@@ -1,0 +1,71 @@
+"""
+Range Navigator - 生產級資料庫安全與防注入模組 (Database Security Module)
+
+本模組落實安全設計原則 (Security-by-Design)：
+1. 針對 SQLite 的動態資料表名稱 (Table Name) 進行嚴格的白名單正則校驗。
+2. 封裝安全的資料庫讀寫介面，阻斷潛在的 SQL 注入攻擊通道。
+"""
+
+import re
+import sqlite3
+import pandas as pd
+
+# 嚴格的資料表名稱白名單正則表達式，僅允許符合 stock_代號_daily 或 stock_代號_5m 格式
+TABLE_NAME_PATTERN = re.compile(r"^stock_[a-zA-Z0-9_]+_(daily|5m)$")
+
+def validate_table_name(table_name: str) -> None:
+    """
+    驗證資料表名稱是否符合安全白名單格式，若不符則立即拋出 ValueError 實施 Fail-Fast 防護。
+    """
+    if not TABLE_NAME_PATTERN.match(table_name):
+        raise ValueError(
+            f"資料庫安全性錯誤：拒絕存取不合規的資料表名稱 '{table_name}'。"
+            f"資料表名稱必須完全符合 'stock_<ticker>_<interval>' 格式且不含特殊字元。"
+        )
+
+def safe_load_db_data(db_path: str, table_name: str) -> pd.DataFrame:
+    """
+    具備 SQL 注入防護的 SQLite 資料載入函數。
+    """
+    validate_table_name(table_name)
+    
+    conn = sqlite3.connect(db_path)
+    try:
+        # 經正則白名單驗證後的安全表名，方能進行 SQL 拼接
+        query = f"SELECT * FROM {table_name}"
+        df = pd.read_sql_query(query, conn)
+        
+        if not df.empty and 'datetime' in df.columns:
+            df['datetime'] = pd.to_datetime(df['datetime'])
+            df = df.set_index('datetime')
+        return df
+    except Exception as e:
+        print(f"資料庫安全載入失敗: {e}")
+        return pd.DataFrame()
+    finally:
+        conn.close()
+
+def safe_save_to_sqlite(df: pd.DataFrame, table_name: str, db_path: str) -> bool:
+    """
+    具備 SQL 注入防護的 SQLite 資料寫入與取代函數。
+    """
+    validate_table_name(table_name)
+    
+    conn = None
+    try:
+        conn = sqlite3.connect(db_path)
+        # 使用 Pandas 內建編譯器寫入，強化欄位與型態校驗
+        df.to_sql(
+            name=table_name, 
+            con=conn, 
+            if_exists="replace", 
+            index=True, 
+            index_label="datetime"
+        )
+        return True
+    except Exception as e:
+        print(f"資料庫安全寫入失敗: {e}")
+        return False
+    finally:
+        if conn:
+            conn.close()

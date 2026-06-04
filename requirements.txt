@@ -1,0 +1,10 @@
+pandas
+numpy
+yfinance
+plotly
+streamlit
+pydantic>=2.0.0
+pyyaml
+requests
+numba
+pytest

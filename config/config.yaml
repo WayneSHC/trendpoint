@@ -1,0 +1,52 @@
+backtest:
+  init_capital: 1000000.0
+data:
+  database_path: range_navigator.db
+  tickers:
+  - 2330.TW
+  - 0050.TW
+  - 00878.TW
+  - 00919.TW
+  - 00631L.TW
+strategy:
+  default:
+    atr_period: 14
+    chandelier_mult: 3.0
+    chandelier_period: 22
+    ladder_k: 2.0
+    time_limit: 15
+  ticker_overrides:
+    0050.TW:
+      atr_period: 10
+      chandelier_mult: 3.0
+      chandelier_period: 22
+      ladder_k: 1.5
+      time_limit: 15
+    00631L.TW:
+      atr_period: 10
+      chandelier_mult: 3.0
+      chandelier_period: 22
+      ladder_k: 1.5
+      time_limit: 15
+    00878.TW:
+      atr_period: 10
+      chandelier_mult: 3.0
+      chandelier_period: 22
+      ladder_k: 1.5
+      time_limit: 15
+    00919.TW:
+      atr_period: 10
+      chandelier_mult: 3.0
+      chandelier_period: 22
+      ladder_k: 1.5
+      time_limit: 15
+    2330.TW:
+      atr_period: 10
+      chandelier_mult: 3.0
+      chandelier_period: 22
+      ladder_k: 1.5
+      time_limit: 15
+trading_cost:
+  commission_rate: 0.001425
+  slip_rate: 0.0005
+  tax_rate: 0.003

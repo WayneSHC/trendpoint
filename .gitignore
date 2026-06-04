@@ -1,0 +1,21 @@
+# Range Navigator - Git 排除名單 (.gitignore)
+
+# 資料庫與本地快取 (Security & Performance)
+range_navigator.db
+alerts.log
+
+# 敏感資訊 (Credential Protection)
+.env
+.secrets.toml
+
+# Python 暫存與編譯檔
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# 系統與編輯器暫存
+.DS_Store
+.vscode/
+.idea/
+*.swp
