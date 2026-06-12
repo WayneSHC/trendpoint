@@ -13,6 +13,8 @@ import pandas as pd
 from backtester import BacktestEngine
 from config import load_config
 from db_security import safe_load_db_data
+from performance import format_performance_report
+from monte_carlo import bootstrap_trades, format_monte_carlo_report
 
 def load_data_from_db(db_path: str, table_name: str) -> pd.DataFrame:
     """
@@ -35,6 +37,15 @@ def display_summary(ticker: str, summary: dict):
     print(f"  勝率            : {summary['win_rate'] * 100:.2f}%")
     print(f"  盈虧比 (PF)     : {summary['profit_factor']:.2f}")
     print(f"==================================================")
+
+    # 完整風險調整後績效報表 (Sharpe / Sortino / Calmar / 曝險時間)
+    print(format_performance_report(summary, title=f"{ticker} 風險調整後績效"))
+
+    # 蒙地卡羅交易序列重抽：回撤「分布」才是真正的風險預算，而非歷史單一路徑
+    trade_returns = summary.get("trade_returns", [])
+    if trade_returns:
+        mc = bootstrap_trades(trade_returns, n_sims=5000, seed=42)
+        print(format_monte_carlo_report(mc, title=f"{ticker} 蒙地卡羅重抽"))
 
 def run():
     # 載入強型別設定檔
@@ -71,14 +82,23 @@ def run():
                 
             print(f"載入成功，共 {len(df)} 筆 K 線數據。")
             
-            # 執行回測，使用 config 中的策略參數規格
+            # 執行回測，使用該標的專屬（或預設）的策略參數規格
+            params = cfg.strategy.get_params_for_ticker(ticker)
             results = engine.run_backtest(
                 df=df,
-                atr_period=cfg.strategy.atr_period,
-                k=cfg.strategy.ladder_k,
-                ch_period=cfg.strategy.chandelier_period,
-                ch_multiplier=cfg.strategy.chandelier_mult,
-                time_limit=cfg.strategy.time_limit
+                atr_period=params.atr_period,
+                k=params.ladder_k,
+                ch_period=params.chandelier_period,
+                ch_multiplier=params.chandelier_mult,
+                time_limit=params.time_limit,
+                use_adx_filter=params.use_adx_filter,
+                adx_period=params.adx_period,
+                adx_threshold=params.adx_threshold,
+                use_ma_filter=params.use_ma_filter,
+                ma_period=params.ma_period,
+                use_er_filter=params.use_er_filter,
+                er_period=params.er_period,
+                er_threshold=params.er_threshold
             )
             
             summary = results["summary"]
