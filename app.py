@@ -92,18 +92,18 @@ st.markdown("""
     @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+TC:wght@400;500;600;700&display=swap');
 
     :root {
-        --bg: #0a0e14;
-        --panel: #10151e;
-        --panel-raised: #141b26;
-        --border: #1f2937;
-        --hairline: #1a2230;
-        --text: #d7e0ec;
-        --muted: #647187;
-        --faint: #3d4759;
-        --up: #ff5d6c;        /* 台股慣例：紅漲 */
-        --down: #34d399;      /* 台股慣例：綠跌 */
-        --amber: #e8b339;     /* 系統/警示 */
-        --cyan: #51b8e0;      /* 中性數據 */
+        --bg: #f4f6f9;
+        --panel: #ffffff;
+        --panel-raised: #fbfcfe;
+        --border: #d4dbe4;
+        --hairline: #e3e8ef;
+        --text: #1c2733;
+        --muted: #5b6b7e;
+        --faint: #9aa7b5;
+        --up: #d6293d;        /* 台股慣例：紅漲 */
+        --down: #0e8f6a;      /* 台股慣例：綠跌 */
+        --amber: #b07d10;     /* 系統/警示 */
+        --cyan: #1577a8;      /* 中性數據 */
         --mono: 'IBM Plex Mono', monospace;
         --sans: 'IBM Plex Sans TC', sans-serif;
     }
@@ -114,7 +114,7 @@ st.markdown("""
         content: "";
         position: fixed; inset: 0; pointer-events: none; z-index: 0;
         background:
-            repeating-linear-gradient(0deg, transparent 0 2px, rgba(255,255,255,0.006) 2px 4px);
+            repeating-linear-gradient(0deg, transparent 0 2px, rgba(0,0,0,0.008) 2px 4px);
     }
 
     /* ── 終端機頂欄 ─────────────────────────────────────── */
@@ -144,7 +144,7 @@ st.markdown("""
         border: 1px solid var(--border); margin: 14px 0 4px 0;
     }
     @media (max-width: 1100px) { .signal-strip { grid-template-columns: 1fr; } }
-    .signal-cell { background: var(--panel); padding: 14px 18px; }
+    .signal-cell { background: var(--panel); padding: 14px 18px; box-shadow: 0 1px 2px rgba(28,39,51,0.04); }
     .signal-cell .label {
         font-family: var(--mono); font-size: 10px; letter-spacing: 2px;
         text-transform: uppercase; color: var(--muted); margin-bottom: 8px;
@@ -153,8 +153,8 @@ st.markdown("""
         font-family: var(--mono); font-size: 30px; font-weight: 600;
         letter-spacing: 2px; line-height: 1.1;
     }
-    .bias-badge.long  { color: var(--up);   text-shadow: 0 0 18px rgba(255,93,108,0.35); }
-    .bias-badge.short { color: var(--down); text-shadow: 0 0 18px rgba(52,211,153,0.35); }
+    .bias-badge.long  { color: var(--up);   text-shadow: 0 0 14px rgba(214,41,61,0.25); }
+    .bias-badge.short { color: var(--down); text-shadow: 0 0 14px rgba(14,143,106,0.25); }
     .bias-badge.flat  { color: var(--amber); }
     .bias-note { font-size: 12px; color: var(--muted); margin-top: 6px; line-height: 1.5; }
 
@@ -175,7 +175,7 @@ st.markdown("""
         font-family: var(--mono); font-size: 12px; color: var(--text);
     }
     .gate .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
-    .gate .dot.pass { background: var(--up); box-shadow: 0 0 8px rgba(255,93,108,0.6); }
+    .gate .dot.pass { background: var(--up); box-shadow: 0 0 6px rgba(214,41,61,0.45); }
     .gate .dot.block { background: var(--faint); }
     .gate .gv { margin-left: auto; color: var(--muted); }
 
@@ -202,8 +202,8 @@ st.markdown("""
 
     /* ── 警示帶 ─────────────────────────────────────────── */
     .caution-band {
-        border: 1px solid rgba(232,179,57,0.45); border-left: 3px solid var(--amber);
-        background: rgba(232,179,57,0.06);
+        border: 1px solid rgba(176,125,16,0.4); border-left: 3px solid var(--amber);
+        background: rgba(176,125,16,0.07);
         font-family: var(--mono); font-size: 12px; color: var(--amber);
         padding: 8px 14px; margin: 8px 0; letter-spacing: 0.5px;
     }
@@ -239,7 +239,7 @@ def cached_fetch(ticker: str, period: str, interval: str):
 # 4. 側邊欄控制面板 (Control Panel)
 # =========================================================================
 st.sidebar.markdown(
-    '<div style="font-family: var(--mono); letter-spacing:2px; font-size:13px; color:#e8b339;">'
+    '<div style="font-family: var(--mono); letter-spacing:2px; font-size:13px; color:#b07d10;">'
     'CONTROL PANEL</div>', unsafe_allow_html=True
 )
 st.sidebar.header("策略與回測參數")
@@ -616,13 +616,13 @@ tab_price, tab_perf, tab_risk, tab_log = st.tabs([
 ])
 
 PLOT_LAYOUT = dict(
-    template="plotly_dark",
+    template="plotly_white",
     paper_bgcolor="rgba(0,0,0,0)",
-    plot_bgcolor="rgba(16,21,30,0.6)",
-    font=dict(family="IBM Plex Mono, monospace", size=11),
+    plot_bgcolor="rgba(255,255,255,0.7)",
+    font=dict(family="IBM Plex Mono, monospace", size=11, color="#1c2733"),
     margin=dict(l=10, r=10, t=30, b=10),
 )
-GRID = dict(gridcolor="rgba(255,255,255,0.05)")
+GRID = dict(gridcolor="rgba(28,39,51,0.08)")
 
 # ── 9.1 價格與訊號 ────────────────────────────────────────
 with tab_price:
@@ -640,7 +640,7 @@ with tab_price:
             df_normalized = pd.concat(normalized_dfs, axis=1, sort=True).ffill().bfill()
 
             fig_norm = go.Figure()
-            colors = ["#ff5d6c", "#51b8e0", "#e8b339", "#b48ce0", "#34d399"]
+            colors = ["#d6293d", "#1577a8", "#b07d10", "#7c4fc4", "#0e8f6a"]
             for idx, t in enumerate(df_normalized.columns):
                 fig_norm.add_trace(go.Scatter(
                     x=df_normalized.index, y=df_normalized[t], name=t,
@@ -673,34 +673,34 @@ with tab_price:
         fig_price.add_trace(go.Candlestick(
             x=plot_df.index, open=plot_df['open'], high=plot_df['high'],
             low=plot_df['low'], close=plot_df['close'], name="K 線",
-            increasing_line_color="#ff5d6c", decreasing_line_color="#34d399",
-            increasing_fillcolor="rgba(255,93,108,0.25)",
-            decreasing_fillcolor="rgba(52,211,153,0.25)"
+            increasing_line_color="#d6293d", decreasing_line_color="#0e8f6a",
+            increasing_fillcolor="rgba(214,41,61,0.22)",
+            decreasing_fillcolor="rgba(14,143,106,0.2)"
         ), row=1, col=1)
 
         fig_price.add_trace(go.Scatter(
             x=plot_df.index, y=plot_df['ladder'], name="多空階梯",
-            line=dict(color="#51b8e0", width=2.0, shape="hv"), opacity=0.9
+            line=dict(color="#1577a8", width=2.0, shape="hv"), opacity=0.9
         ), row=1, col=1)
         fig_price.add_trace(go.Scatter(
             x=plot_df.index, y=plot_df['ch_long'], name="吊燈止損",
-            line=dict(color="#b48ce0", width=1.3, dash="dashdot"), opacity=0.7
+            line=dict(color="#7c4fc4", width=1.3, dash="dashdot"), opacity=0.7
         ), row=1, col=1)
 
         if show_ema:
             fig_price.add_trace(go.Scatter(x=plot_df.index, y=plot_df['ema'], name="EMA 20",
-                                line=dict(color="#ffa726", width=1.2), opacity=0.8), row=1, col=1)
+                                line=dict(color="#d97f06", width=1.2), opacity=0.8), row=1, col=1)
         if show_ema_200:
             fig_price.add_trace(go.Scatter(x=plot_df.index, y=plot_df['ema_200'], name="EMA 200",
-                                line=dict(color="#e8b339", width=1.4), opacity=0.85), row=1, col=1)
+                                line=dict(color="#b07d10", width=1.4), opacity=0.85), row=1, col=1)
         if show_kama:
             fig_price.add_trace(go.Scatter(x=plot_df.index, y=plot_df['kama'], name="KAMA 10",
-                                line=dict(color="#26a69a", width=1.4), opacity=0.8), row=1, col=1)
+                                line=dict(color="#0d8077", width=1.4), opacity=0.8), row=1, col=1)
         if show_bb:
             fig_price.add_trace(go.Scatter(x=plot_df.index, y=plot_df['bb_upper'], name="BB 上軌",
-                                line=dict(color="#4fc3f7", width=0.9, dash="dash"), opacity=0.5), row=1, col=1)
+                                line=dict(color="#2a93c9", width=0.9, dash="dash"), opacity=0.5), row=1, col=1)
             fig_price.add_trace(go.Scatter(x=plot_df.index, y=plot_df['bb_lower'], name="BB 下軌",
-                                line=dict(color="#4fc3f7", width=0.9, dash="dash"), opacity=0.5), row=1, col=1)
+                                line=dict(color="#2a93c9", width=0.9, dash="dash"), opacity=0.5), row=1, col=1)
 
         # 進出場標記
         if not df_trades.empty:
@@ -708,21 +708,21 @@ with tab_price:
             if not buys.empty:
                 fig_price.add_trace(go.Scatter(
                     x=pd.to_datetime(buys['datetime']), y=buys['price'], mode="markers",
-                    marker=dict(symbol="triangle-up", size=11, color="#ff5d6c", line=dict(width=1, color="#ffffff")),
+                    marker=dict(symbol="triangle-up", size=11, color="#d6293d", line=dict(width=1, color="#1c2733")),
                     name="進場 BUY"
                 ), row=1, col=1)
             halfs = df_trades[df_trades['action'] == 'SELL_HALF']
             if not halfs.empty:
                 fig_price.add_trace(go.Scatter(
                     x=pd.to_datetime(halfs['datetime']), y=halfs['price'], mode="markers",
-                    marker=dict(symbol="triangle-down", size=10, color="#e8b339", line=dict(width=1, color="#ffffff")),
+                    marker=dict(symbol="triangle-down", size=10, color="#b07d10", line=dict(width=1, color="#1c2733")),
                     name="止盈 50%"
                 ), row=1, col=1)
             exits = df_trades[df_trades['action'] == 'SELL_ALL']
             if not exits.empty:
                 fig_price.add_trace(go.Scatter(
                     x=pd.to_datetime(exits['datetime']), y=exits['price'], mode="markers",
-                    marker=dict(symbol="x", size=10, color="#34d399", line=dict(width=1, color="#ffffff")),
+                    marker=dict(symbol="x", size=10, color="#0e8f6a", line=dict(width=1, color="#1c2733")),
                     name="平倉 EXIT"
                 ), row=1, col=1)
 
@@ -730,10 +730,10 @@ with tab_price:
         adx_plot = calculate_adx(plot_df)
         fig_price.add_trace(go.Scatter(
             x=plot_df.index, y=adx_plot, name="ADX",
-            line=dict(color="#e8b339", width=1.2), fill='tozeroy',
-            fillcolor='rgba(232,179,57,0.07)'
+            line=dict(color="#b07d10", width=1.2), fill='tozeroy',
+            fillcolor='rgba(176,125,16,0.08)'
         ), row=2, col=1)
-        fig_price.add_hline(y=adx_threshold, line=dict(color="#647187", width=1, dash="dot"), row=2, col=1)
+        fig_price.add_hline(y=adx_threshold, line=dict(color="#9aa7b5", width=1, dash="dot"), row=2, col=1)
 
         # 預設視窗顯示最近一年，保留 10 年可回溯
         default_start = plot_df.index[-1] - pd.Timedelta(days=365)
@@ -750,8 +750,8 @@ with tab_price:
                     dict(count=3, label="3Y", step="year", stepmode="backward"),
                     dict(step="all", label="ALL"),
                 ],
-                bgcolor="rgba(16,21,30,0.8)", activecolor="rgba(232,179,57,0.3)",
-                font=dict(color="#d7e0ec")
+                bgcolor="rgba(255,255,255,0.9)", activecolor="rgba(176,125,16,0.25)",
+                font=dict(color="#1c2733")
             )
         )
         st.plotly_chart(fig_price, width='stretch')
@@ -762,16 +762,16 @@ with tab_perf:
                                 vertical_spacing=0.06, row_heights=[0.68, 0.32])
     fig_metrics.add_trace(go.Scatter(
         x=df_equity.index, y=df_equity['equity'], name="帳戶淨值",
-        line=dict(color="#51b8e0", width=2.0),
-        fill='tozeroy', fillcolor='rgba(81,184,224,0.06)'
+        line=dict(color="#1577a8", width=2.0),
+        fill='tozeroy', fillcolor='rgba(21,119,168,0.07)'
     ), row=1, col=1)
 
     peaks = df_equity['equity'].cummax()
     drawdowns = (df_equity['equity'] - peaks) / peaks * 100.0
     fig_metrics.add_trace(go.Scatter(
         x=df_equity.index, y=drawdowns, name="回撤 (%)",
-        line=dict(color="#34d399", width=1.2),
-        fill='tozeroy', fillcolor='rgba(52,211,153,0.12)'
+        line=dict(color="#0e8f6a", width=1.2),
+        fill='tozeroy', fillcolor='rgba(14,143,106,0.12)'
     ), row=2, col=1)
 
     fig_metrics.update_layout(height=430, showlegend=False, **PLOT_LAYOUT)
@@ -789,9 +789,9 @@ with tab_perf:
         rs = rolling_sharpe(df_equity['equity'], window=126)
         fig_rs = go.Figure()
         fig_rs.add_trace(go.Scatter(x=rs.index, y=rs, name="Rolling Sharpe",
-                                    line=dict(color="#e8b339", width=1.5)))
-        fig_rs.add_hline(y=0, line=dict(color="#647187", width=1, dash="dot"))
-        fig_rs.add_hline(y=1, line=dict(color="#3d4759", width=1, dash="dot"))
+                                    line=dict(color="#b07d10", width=1.5)))
+        fig_rs.add_hline(y=0, line=dict(color="#9aa7b5", width=1, dash="dot"))
+        fig_rs.add_hline(y=1, line=dict(color="#c2ccd6", width=1, dash="dot"))
         fig_rs.update_layout(height=300, showlegend=False, **PLOT_LAYOUT, xaxis=GRID, yaxis=GRID)
         st.plotly_chart(fig_rs, width='stretch')
 
@@ -811,7 +811,7 @@ with tab_perf:
                 z=hm.values,
                 x=[f"{m:02d}" for m in hm.columns],
                 y=[str(y) for y in hm.index],
-                colorscale=[[0.0, "#34d399"], [0.5, "#10151e"], [1.0, "#ff5d6c"]],
+                colorscale=[[0.0, "#0e8f6a"], [0.5, "#f3f5f8"], [1.0, "#d6293d"]],
                 zmid=0.0,
                 text=np.where(np.isnan(hm.values), "", np.round(hm.values, 1)),
                 texttemplate="%{text}",
@@ -857,12 +857,12 @@ with tab_risk:
             with col_r:
                 fig_mr = go.Figure(go.Histogram(
                     x=np.array(sims_ret) * 100, nbinsx=60,
-                    marker=dict(color="rgba(81,184,224,0.55)", line=dict(color="#51b8e0", width=0.5))
+                    marker=dict(color="rgba(21,119,168,0.45)", line=dict(color="#1577a8", width=0.5))
                 ))
-                fig_mr.add_vline(x=mc["total_return"][5] * 100, line=dict(color="#e8b339", width=1.5, dash="dash"),
-                                 annotation_text="5%", annotation_font_color="#e8b339")
-                fig_mr.add_vline(x=mc["total_return"][50] * 100, line=dict(color="#d7e0ec", width=1.5, dash="dot"),
-                                 annotation_text="中位", annotation_font_color="#d7e0ec")
+                fig_mr.add_vline(x=mc["total_return"][5] * 100, line=dict(color="#b07d10", width=1.5, dash="dash"),
+                                 annotation_text="5%", annotation_font_color="#b07d10")
+                fig_mr.add_vline(x=mc["total_return"][50] * 100, line=dict(color="#39434f", width=1.5, dash="dot"),
+                                 annotation_text="中位", annotation_font_color="#39434f")
                 fig_mr.update_layout(height=320, title="總報酬分布 (%)", showlegend=False,
                                      **PLOT_LAYOUT, xaxis=GRID, yaxis=GRID)
                 st.plotly_chart(fig_mr, width='stretch')
@@ -870,10 +870,10 @@ with tab_risk:
             with col_d:
                 fig_md = go.Figure(go.Histogram(
                     x=np.array(sims_mdd) * 100, nbinsx=60,
-                    marker=dict(color="rgba(52,211,153,0.45)", line=dict(color="#34d399", width=0.5))
+                    marker=dict(color="rgba(14,143,106,0.4)", line=dict(color="#0e8f6a", width=0.5))
                 ))
-                fig_md.add_vline(x=mc["max_drawdown"][5] * 100, line=dict(color="#e8b339", width=1.5, dash="dash"),
-                                 annotation_text="最差 5%", annotation_font_color="#e8b339")
+                fig_md.add_vline(x=mc["max_drawdown"][5] * 100, line=dict(color="#b07d10", width=1.5, dash="dash"),
+                                 annotation_text="最差 5%", annotation_font_color="#b07d10")
                 fig_md.update_layout(height=320, title="最大回撤分布 (%)", showlegend=False,
                                      **PLOT_LAYOUT, xaxis=GRID, yaxis=GRID)
                 st.plotly_chart(fig_md, width='stretch')
@@ -901,7 +901,7 @@ with tab_risk:
         fig_tr = go.Figure(go.Bar(
             x=list(range(1, len(trade_returns) + 1)),
             y=[r * 100 for r in trade_returns],
-            marker=dict(color=["#ff5d6c" if r >= 0 else "#34d399" for r in trade_returns])
+            marker=dict(color=["#d6293d" if r >= 0 else "#0e8f6a" for r in trade_returns])
         ))
         fig_tr.update_layout(height=260, showlegend=False, **PLOT_LAYOUT,
                              xaxis=dict(title="交易序號", **GRID), yaxis=dict(title="報酬 %", **GRID))
