@@ -11,9 +11,11 @@ import os
 import sqlite3
 import pandas as pd
 import yfinance as yf
+from security_utils import rate_limiter
 from db_security import safe_save_to_sqlite
 from typing import Optional
 
+@rate_limiter(calls=5, period=60)
 def fetch_stock_data(ticker: str, period: str = "1mo", interval: str = "1d", auto_adjust: bool = True) -> Optional[pd.DataFrame]:
     """
     透過 yfinance API 抓取指定標的之 K 線數據。
