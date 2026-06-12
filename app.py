@@ -21,6 +21,7 @@ from backtester import BacktestEngine
 from data_ingestion import fetch_stock_data
 from config import load_config
 from db_security import safe_load_db_data, safe_save_to_sqlite
+from security_utils import is_locked, register_failed_attempt, reset_lockout
 
 # 載入強型別規格配置
 cfg = load_config()
@@ -31,7 +32,13 @@ cfg = load_config()
 def check_password() -> bool:
     """
     簡易密碼驗證防護閘。若 st.secrets 中未設定 password，則預設跳過，便於本地開發。
+    加入登入鎖定機制，防止暴力破解。連續失敗超過上限將暫時鎖定。
     """
+    # 若已被鎖定，提示使用者稍後再試
+    if is_locked(st.session_state):
+        st.warning("已達嘗試上限，請稍後再試。")
+        return False
+
     try:
         if "password" not in st.secrets:
             return True
@@ -40,11 +47,15 @@ def check_password() -> bool:
         return True
 
     def password_entered():
-        if st.session_state["password"] == st.secrets["password"]:
+        if st.session_state.get("password") == st.secrets["password"]:
             st.session_state["password_correct"] = True
+            # 成功登入，重置鎖定狀態
+            reset_lockout(st.session_state)
             del st.session_state["password"]
         else:
             st.session_state["password_correct"] = False
+            # 登入失敗，註冊失敗嘗試並可能觸發鎖定
+            register_failed_attempt(st.session_state)
 
     if "password_correct" not in st.session_state:
         st.text_input(
