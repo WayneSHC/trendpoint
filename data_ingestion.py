@@ -14,23 +14,26 @@ import yfinance as yf
 from db_security import safe_save_to_sqlite
 from typing import Optional
 
-def fetch_stock_data(ticker: str, period: str = "1mo", interval: str = "1d") -> Optional[pd.DataFrame]:
+def fetch_stock_data(ticker: str, period: str = "1mo", interval: str = "1d", auto_adjust: bool = True) -> Optional[pd.DataFrame]:
     """
     透過 yfinance API 抓取指定標的之 K 線數據。
-    
+
     參數:
         ticker (str): 標的代號 (例如 "0050.TW", "2330.TW")
         period (str): 抓取歷史長度 (1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, max)
         interval (str): K 線週期 (1m, 2m, 5m, 15m, 30m, 60m, 90m, 1h, 1d, 5d, 1wk, 1mo, 3mo)
-        
+        auto_adjust (bool): 是否使用還原股價 (預設 True)。
+            高股息 ETF (如 00878、00919) 若使用未還原價格回測，每次除息缺口
+            都會被系統誤判為跌破支撐，訊號與績效全數失真，故預設強制還原。
+
     回傳:
         pd.DataFrame: 格式化後的 K 線數據。若抓取失敗或無數據，回傳 None。
     """
-    print(f"開始下載 {ticker} 數據 (週期: {period}, K 線間距: {interval})...")
-    
+    print(f"開始下載 {ticker} 數據 (週期: {period}, K 線間距: {interval}, 還原股價: {auto_adjust})...")
+
     try:
-        # 呼叫 yfinance 下載
-        df = yf.download(tickers=ticker, period=period, interval=interval, progress=False)
+        # 呼叫 yfinance 下載 (auto_adjust=True 會將 OHLC 全數還原除權息與分割)
+        df = yf.download(tickers=ticker, period=period, interval=interval, progress=False, auto_adjust=auto_adjust)
         
         if df.empty:
             print(f"警告：{ticker} 未能獲取任何數據，請檢查標的代號或週期。")

@@ -42,44 +42,46 @@ def test_no_lookahead_bias():
     df_original = _generate_mock_data(n_bars)
     
     # 建立回測引擎
+    # lot_size=1：本測試驗證的是時序誠實性而非執行真實性，
+    # 使用零股單位與停用市況濾網，確保 mock 數據能產生足夠的交易樣本。
     engine = BacktestEngine(
         initial_capital=1000000.0,
         commission_rate=0.001425,
         tax_rate=0.003,
-        slippage_rate=0.0005
+        slippage_rate=0.0005,
+        lot_size=1
     )
-    
-    # 執行原始回測
-    res_orig = engine.run_backtest(
-        df_original,
+
+    common_kwargs = dict(
         atr_period=14,
         k=2.0,
         ch_period=22,
         ch_multiplier=3.0,
-        time_limit=15
+        time_limit=15,
+        use_adx_filter=False,
+        use_ma_filter=False
     )
+
+    # 執行原始回測
+    res_orig = engine.run_backtest(df_original, **common_kwargs)
     trades_orig = res_orig["trades"]
-    
+
     # 建立篡改版 DataFrame：將第 80 根 K 線之後的所有價格大幅修改（未來巨變）
     df_modified = df_original.copy()
     split_idx = 80
     split_time = df_original.index[split_idx]
-    
+
     df_modified.iloc[split_idx:, df_modified.columns.get_loc('close')] *= 2.0
     df_modified.iloc[split_idx:, df_modified.columns.get_loc('open')] *= 2.0
     df_modified.iloc[split_idx:, df_modified.columns.get_loc('high')] *= 2.0
     df_modified.iloc[split_idx:, df_modified.columns.get_loc('low')] *= 2.0
-    
+
     # 執行篡改版回測
-    res_mod = engine.run_backtest(
-        df_modified,
-        atr_period=14,
-        k=2.0,
-        ch_period=22,
-        ch_multiplier=3.0,
-        time_limit=15
-    )
+    res_mod = engine.run_backtest(df_modified, **common_kwargs)
     trades_mod = res_mod["trades"]
+
+    # 防呆：本測試必須有交易樣本才有驗證意義
+    assert len(trades_orig) > 0, "mock 數據未產生任何交易，測試失去驗證意義"
     
     # 篩選在第 80 根 K 線（t < split_time）之前的交易紀錄
     trades_orig_before = trades_orig[trades_orig["datetime"] < split_time]

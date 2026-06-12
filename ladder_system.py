@@ -258,6 +258,73 @@ def calculate_kama(series: pd.Series, period: int = 10, fast_span: int = 2, slow
     
     return pd.Series(kama_out, index=series.index)
 
+def calculate_adx(df: pd.DataFrame, period: int = 14) -> pd.Series:
+    """
+    計算平均趨向指標 (Average Directional Index, ADX)，採用懷爾德平滑法。
+    ADX 衡量趨勢強度（不分方向）：低於 20 一般視為盤整市況。
+    趨勢跟蹤系統最大的敵人是盤整掃損，故以 ADX 作為進場的趨勢強度濾網。
+    """
+    high = df['high']
+    low = df['low']
+    close = df['close']
+
+    up_move = high.diff()
+    down_move = -low.diff()
+
+    plus_dm = pd.Series(np.where((up_move > down_move) & (up_move > 0), up_move, 0.0), index=df.index)
+    minus_dm = pd.Series(np.where((down_move > up_move) & (down_move > 0), down_move, 0.0), index=df.index)
+
+    tr = calculate_tr(high, low, close)
+
+    # 懷爾德平滑 (等效於 alpha = 1/period 的 EMA)
+    atr_s = tr.ewm(alpha=1.0 / period, adjust=False).mean()
+    plus_di = 100.0 * plus_dm.ewm(alpha=1.0 / period, adjust=False).mean() / atr_s.replace(0, np.nan)
+    minus_di = 100.0 * minus_dm.ewm(alpha=1.0 / period, adjust=False).mean() / atr_s.replace(0, np.nan)
+
+    dx = 100.0 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan)
+    adx = dx.ewm(alpha=1.0 / period, adjust=False).mean()
+
+    return adx.fillna(0.0)
+
+def calculate_efficiency_ratio(series: pd.Series, period: int = 10) -> pd.Series:
+    """
+    計算 Kaufman 效率比率 (Efficiency Ratio, ER)
+    ER = |淨位移| / 路徑總長度，介於 0~1。
+    接近 1 代表單邊趨勢行情；接近 0 代表來回震盪的高噪音盤整。
+    """
+    direction = (series - series.shift(period)).abs()
+    volatility = series.diff().abs().rolling(window=period).sum()
+    er = direction / volatility.replace(0, np.nan)
+    return er.fillna(0.0).clip(0.0, 1.0)
+
+def calculate_regime_filter(df: pd.DataFrame,
+                            use_adx: bool = True, adx_period: int = 14, adx_threshold: float = 20.0,
+                            use_ma: bool = True, ma_period: int = 200,
+                            use_er: bool = False, er_period: int = 10, er_threshold: float = 0.3) -> pd.Series:
+    """
+    綜合市況濾網 (Regime Filter)：回傳布林序列，True 代表允許做多進場。
+    - ADX 濾網：趨勢強度不足（盤整）時禁止進場。
+    - 長均線濾網：價格低於長期均線（如 200MA）時禁止做多——最便宜的災難保險。
+    - ER 濾網：路徑噪音過高時禁止進場。
+    所有指標均移位一根 K 線，確保僅使用已收盤的歷史數據（防看前偏誤）。
+    """
+    ok = pd.Series(True, index=df.index)
+
+    if use_adx:
+        adx = calculate_adx(df, period=adx_period).shift(1)
+        ok &= (adx >= adx_threshold)
+
+    if use_ma:
+        # min_periods 防止前段資料全為 NaN 而封死整段回測（資料不足時以現有均值替代）
+        long_ma = df['close'].rolling(window=ma_period, min_periods=1).mean().shift(1)
+        ok &= (df['close'] > long_ma)
+
+    if use_er:
+        er = calculate_efficiency_ratio(df['close'], period=er_period).shift(1)
+        ok &= (er >= er_threshold)
+
+    return ok.fillna(False)
+
 def calculate_bollinger_bands(series: pd.Series, period: int = 20, num_std: float = 2.0) -> Tuple[pd.Series, pd.Series, pd.Series]:
     """
     計算布林通道 (Bollinger Bands)
@@ -286,38 +353,46 @@ class PositionManager:
         self.stage = 0 # 0: 未進場, 1: 初始持倉, 2: 已完成階段 1 減半並保本
         self.direction = 0 # 1: 多頭, -1: 空頭
 
-    def check_entry_signal(self, 
-                           close: float, 
-                           open_val: float, 
-                           daily_open: float, 
-                           vwap: float, 
-                           atr: float, 
-                           candle_high: float, 
-                           candle_low: float, 
-                           structure_sig: int, 
+    def check_entry_signal(self,
+                           close: float,
+                           open_val: float,
+                           daily_open: float,
+                           vwap: float,
+                           atr: float,
+                           candle_high: float,
+                           candle_low: float,
+                           structure_sig: int,
                            global_filter_ok: bool,
-                           is_daily: bool = False) -> bool:
+                           is_daily: bool = False,
+                           disabled_filters: frozenset = frozenset()) -> bool:
         """
         多重確認進場邏輯 (4 維度確認)
+
+        disabled_filters 可包含 'structure' / 'momentum' / 'trend' / 'volatility' / 'global'，
+        被列入的維度將直接視為通過。此參數供消融測試 (Ablation Test) 逐一評估
+        每道濾網對期望值的真實貢獻，避免堆疊「看起來嚴謹」但只會扼殺交易次數的濾網。
         """
         # 1. 結構端: MSS 或 BOS 方向確認 (1 代表看漲，-1 代表看跌，0 代表無訊號)
-        structure_ok = (structure_sig == 1)
-        
+        structure_ok = (structure_sig == 1) or ('structure' in disabled_filters)
+
         # 2. 動能端: 收紅 K (陽線)
-        momentum_ok = (close > open_val)
-        
+        momentum_ok = (close > open_val) or ('momentum' in disabled_filters)
+
         # 3. 趨勢端: 價格同時處於當日開盤價與 VWAP 之上 (若為日線則 vwap 等於 close，此時僅看高於 daily_open)
         if is_daily:
             trend_ok = (close > daily_open)
         else:
             trend_ok = (close > daily_open) and (close > vwap)
-        
+        trend_ok = trend_ok or ('trend' in disabled_filters)
+
         # 4. 波動端: 振幅位移大於 1.2 倍 ATR
         amplitude = candle_high - candle_low
-        volatility_ok = (amplitude > 1.2 * atr)
-        
-        # 綜合全域濾網 (例如三關價判定)
-        return structure_ok and momentum_ok and trend_ok and volatility_ok and global_filter_ok
+        volatility_ok = (amplitude > 1.2 * atr) or ('volatility' in disabled_filters)
+
+        # 綜合全域濾網 (例如三關價判定與市況濾網)
+        global_ok = global_filter_ok or ('global' in disabled_filters)
+
+        return structure_ok and momentum_ok and trend_ok and volatility_ok and global_ok
 
     def manage_position(self, 
                         current_close: float, 

@@ -63,6 +63,43 @@ class SingleStrategyParams(BaseModel):
         ge=1,
         description="持倉的最大 K 線根數限制，防禦時間維度的風險"
     )
+    use_adx_filter: bool = Field(
+        default=True,
+        description="是否啟用 ADX 趨勢強度濾網（盤整市況不進場）"
+    )
+    adx_period: int = Field(
+        default=14,
+        ge=2,
+        description="ADX 計算週期"
+    )
+    adx_threshold: float = Field(
+        default=20.0,
+        ge=0.0,
+        description="ADX 低於此值視為盤整，不觸發進場"
+    )
+    use_ma_filter: bool = Field(
+        default=True,
+        description="是否啟用長期均線大週期濾網（價格低於長均線不做多）"
+    )
+    ma_period: int = Field(
+        default=200,
+        ge=2,
+        description="大週期均線回看期數（日線預設 200）"
+    )
+    use_er_filter: bool = Field(
+        default=False,
+        description="是否啟用 Kaufman 效率比率濾網（噪音過高不進場）"
+    )
+    er_period: int = Field(
+        default=10,
+        ge=2,
+        description="Kaufman Efficiency Ratio 計算週期"
+    )
+    er_threshold: float = Field(
+        default=0.3,
+        ge=0.0, le=1.0,
+        description="ER 低於此值視為高噪音盤整，不觸發進場"
+    )
 
 class StrategyConfig(BaseModel):
     """
@@ -102,6 +139,31 @@ class TradingCostConfig(BaseModel):
         ge=0.0,
         description="預估滑點率（單邊），不得為负值"
     )
+    lot_size: int = Field(
+        default=1000,
+        ge=1,
+        description="整股交易單位（台股一張為 1000 股）；買進股數會向下取整至此單位之倍數"
+    )
+
+class PortfolioConfig(BaseModel):
+    """
+    多標的投資組合資金配置設定
+    """
+    allocation: str = Field(
+        default="inverse_vol",
+        pattern="^(equal|inverse_vol)$",
+        description="資金配置法：equal（等權重）或 inverse_vol（波動率倒數加權，風險均衡）"
+    )
+    vol_lookback: int = Field(
+        default=60,
+        ge=5,
+        description="計算已實現波動率之滾動回看期數"
+    )
+    max_weight: float = Field(
+        default=0.5,
+        gt=0.0, le=1.0,
+        description="單一標的之最大資金權重上限，防止低波動標的吃掉整個組合"
+    )
 
 class SystemConfig(BaseModel):
     """
@@ -111,6 +173,7 @@ class SystemConfig(BaseModel):
     backtest: BacktestConfig = Field(default_factory=BacktestConfig)
     strategy: StrategyConfig = Field(default_factory=StrategyConfig)
     trading_cost: TradingCostConfig = Field(default_factory=TradingCostConfig)
+    portfolio: PortfolioConfig = Field(default_factory=PortfolioConfig)
 
 def load_config(config_path: str = None) -> SystemConfig:
     """

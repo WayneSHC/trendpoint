@@ -23,8 +23,10 @@ def run():
     tickers = sys_cfg.data.tickers
     
     # 下載日線與 5分鐘線配置
+    # 日線抓取 10 年：交易樣本不足 30~50 筆時，任何勝率與盈虧比都只是雜訊。
+    # 歷史必須涵蓋完整多空循環（如 2020/03 與 2022 空頭），統計才有意義。
     configs = [
-        {"name": "daily", "period": "1y", "interval": "1d", "csv_suffix": "daily", "table_prefix": "stock_"},
+        {"name": "daily", "period": "10y", "interval": "1d", "csv_suffix": "daily", "table_prefix": "stock_"},
         {"name": "5m", "period": "5d", "interval": "5m", "csv_suffix": "5m", "table_prefix": "stock_"}
     ]
     
