@@ -1,5 +1,5 @@
 """
-Range Navigator - 系統設定驗證規格模組 (Configuration Spec)
+TrendPoint - 系統設定驗證規格模組 (Configuration Spec)
 
 本模組使用 Pydantic (v2) 定義系統所有配置參數的資料合約，並在載入時執行靜態驗證，
 落實軟體工程的 Fail-Fast 防錯機制，確保傳入策略與回測引擎的參數皆符合合理的數學邊界。
@@ -16,7 +16,7 @@ class DataConfig(BaseModel):
     資料來源與存儲設定
     """
     database_path: str = Field(
-        default="range_navigator.db",
+        default="trendpoint.db",
         description="SQLite 資料庫檔案路徑"
     )
     tickers: List[str] = Field(

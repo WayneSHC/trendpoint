@@ -1,5 +1,5 @@
 """
-Range Navigator - 通知推播核心模組 (Alert Manager)
+TrendPoint - 通知推播核心模組 (Alert Manager)
 
 本模組支援：
 1. 載入 .env 檔案中的 LINE Notify Token 或 Telegram Bot Token。

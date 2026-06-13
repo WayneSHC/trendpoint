@@ -1,5 +1,5 @@
 """
-Range Navigator - 數據收集與清洗模組 (Data Ingestion Module)
+TrendPoint - 數據收集與清洗模組 (Data Ingestion Module)
 
 本模組負責：
 1. 透過 yfinance 獲取標的之歷史與即時 K 線數據 (包含日線與日内分鐘線)。

@@ -1,5 +1,5 @@
 """
-Range Navigator - Walk-Forward 驗證執行腳本 (Run Walk-Forward)
+TrendPoint - Walk-Forward 驗證執行腳本 (Run Walk-Forward)
 
 對設定檔中的每個標的執行滾動式樣本內尋優 / 樣本外驗證，
 並對樣本外交易序列執行蒙地卡羅重抽，輸出完整報告。

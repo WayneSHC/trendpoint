@@ -1,5 +1,5 @@
 """
-Range Navigator - 防看前偏誤（Look-Ahead Bias）規格驗證模組 (pytest)
+TrendPoint - 防看前偏誤（Look-Ahead Bias）規格驗證模組 (pytest)
 
 本測試專門驗證回測引擎的時序嚴格度，透過「歷史資料末梢篡改法」：
 1. 傳入原始模擬時序數據 D1 執行回測，記錄交易紀錄 L1。

@@ -1,5 +1,5 @@
 """
-Range Navigator - 歷史回測執行與驗證腳本 (Run Backtest)
+TrendPoint - 歷史回測執行與驗證腳本 (Run Backtest)
 
 本腳本執行以下任務：
 1. 從 SQLite 資料庫載入 0050.TW 與 2330.TW 的日線數據。

@@ -1,7 +1,7 @@
 backtest:
   init_capital: 1000000.0
 data:
-  database_path: range_navigator.db
+  database_path: trendpoint.db
   tickers:
   - 2330.TW
   - 0050.TW

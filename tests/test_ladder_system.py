@@ -1,5 +1,5 @@
 """
-Range Navigator - 核心技術指標單元測試模組 (pytest)
+TrendPoint - 核心技術指標單元測試模組 (pytest)
 
 本模組針對 ladder_system.py 中所有核心量化指標之數學邏輯進行獨立測試，
 以保證各指標公式（如三關價、ATR、EMA、布林通道）之計算結果符合數學規格。

@@ -1,5 +1,5 @@
 """
-Range Navigator - 投資組合回測引擎與資金分配單元測試 (pytest)
+TrendPoint - 投資組合回測引擎與資金分配單元測試 (pytest)
 
 本測試針對 portfolio_backtester.py 進行測試：
 1. 驗證資料庫連線與指標計算之正確性。
@@ -52,7 +52,7 @@ def test_portfolio_backtest_execution():
     """
     測試 PortfolioBacktester 的聯合成績效回測執行。
     """
-    db_path = "range_navigator.db"
+    db_path = "trendpoint.db"
     if not os.path.exists(db_path):
         pytest.skip("資料庫檔案不存在，跳過實際執行測試")
         

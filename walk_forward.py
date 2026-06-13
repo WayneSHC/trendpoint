@@ -1,5 +1,5 @@
 """
-Range Navigator - Walk-Forward 樣本外驗證模組 (Walk-Forward Analysis)
+TrendPoint - Walk-Forward 樣本外驗證模組 (Walk-Forward Analysis)
 
 全樣本網格尋優挑出的「最佳參數」是用考古題對答案——30 組參數裡總有一組
 碰巧漂亮，但那是雜訊不是訊號。本模組以滾動方式：

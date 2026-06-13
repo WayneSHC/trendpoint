@@ -1,5 +1,5 @@
 """
-Range Navigator - 策略參數自動尋優執行腳本 (Run Optimization)
+TrendPoint - 策略參數自動尋優執行腳本 (Run Optimization)
 
 本腳本執行以下任務：
 1. 載入全域設定檔，取得系統設定的交易標的清單。
@@ -14,7 +14,7 @@ from optimizer import ParameterOptimizer
 
 def run():
     print("=" * 60)
-    print("開始執行 Range Navigator 參數最佳化尋優任務...")
+    print("開始執行 TrendPoint 參數最佳化尋優任務...")
     print("=" * 60)
     
     try:

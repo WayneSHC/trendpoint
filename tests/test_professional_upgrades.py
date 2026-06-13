@@ -1,5 +1,5 @@
 """
-Range Navigator - 專業化升級功能測試 (pytest)
+TrendPoint - 專業化升級功能測試 (pytest)
 
 涵蓋:
 1. 整股單位限制 (round lot)

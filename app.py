@@ -1,5 +1,5 @@
 """
-Range Navigator - 專業交易工作站儀表板 (Trading Workstation Dashboard)
+TrendPoint - 專業交易工作站儀表板 (Trading Workstation Dashboard)
 
 機構級交易終端介面，資訊架構以「交易決策優先」設計：
 1. 訊號決策列：當前多空偏見、市況濾網狀態、今日關鍵價位、風險試算建議部位。
@@ -35,7 +35,7 @@ from ladder_system import (
 # 0. 頁面配置（必須是第一個 Streamlit 指令，否則設密碼後會直接報錯）
 # =========================================================================
 st.set_page_config(
-    page_title="Range Navigator | Trading Workstation",
+    page_title="TrendPoint | Trading Workstation",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -440,7 +440,7 @@ else:
 # =========================================================================
 st.markdown(f"""
 <div class="term-header">
-    <span class="brand">RANGE<span class="tick">⌁</span>NAVIGATOR</span>
+    <span class="brand">TREND<span class="tick">⌁</span>POINT</span>
     <span class="sub">多空階梯交易工作站</span>
     <span class="sub">{'PORTFOLIO MODE' if is_portfolio else ticker_option}</span>
     <span class="stamp">DATA AS OF {data_stamp} · ADJ PRICES · LOT {cfg.trading_cost.lot_size}</span>
