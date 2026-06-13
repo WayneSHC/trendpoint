@@ -38,3 +38,42 @@
 
 ### C. 市場微觀結構與流動性池理論 (Market Microstructure & Liquidity Pools)
 在現代高頻與程式交易市場中，市場參與者的限價單與止損單（Stop Orders）常高度集中在前一日高點之上與低點之下。三關價所計算的邊界，通常與這些「流動性池 (Liquidity Pools)」高度重合。一旦價格突破邊界，觸發停損買單或賣單，將引發空頭擠壓（Short Squeeze）或多頭瓦解（Long Liquidation）的連鎖效應，這正是趨勢突破的微觀動力來源。
+
+---
+
+## 4. 三關價之國際術語對應
+
+「三關價」為台灣期貨社群的慣用語，在國際技術分析體系中有以下對應名稱，方便跨語系研究或對外說明時引用。
+
+### 4.1 精確公式對應
+
+| 本系統名稱 | 計算公式 | 國際最對應術語 |
+|-----------|---------|--------------|
+| **中價（中關）** | `(昨日最高 + 昨日最低) / 2` | CPR Bottom Central (BC)；亦稱 Overnight Mid |
+| **上關** | `中價 + 1.382 × 昨日振幅` | Fibonacci Pivot R1／Fibonacci Extension Upper Band |
+| **下關** | `中價 − 1.382 × 昨日振幅` | Fibonacci Pivot S1／Fibonacci Extension Lower Band |
+
+> **注意**：Classic Pivot Point 的主軸為 `(H+L+C)/3`（含收盤價），與本系統以 `(H+L)/2` 為中價有所不同。本系統與 **CPR（Central Pivot Range）** 的 Bottom Central 完全相同。
+
+### 4.2 主要同類指標比較
+
+| 指標系統 | 中軸定義 | 擴展係數 | 與三關價差異 |
+|---------|---------|---------|------------|
+| **Classic Pivot Points** | (H+L+C)/3 | 固定倍數 | 加入收盤價；係數不同 |
+| **CPR (Central Pivot Range)** | (H+L)/2 ← **相同** | 無固定帶寬 | 帶寬未標準化 |
+| **Fibonacci Pivot Points** | (H+L+C)/3 | **1.382、0.618…** ← 係數相同 | 中軸加入收盤價 |
+| **Camarilla Pivots** | 以收盤±極差推算 | 固定係數 | 計算基礎不同 |
+| **Bollinger Bands** | 滾動均線 | ±2σ（標準差） | 動態窗口；非前一日靜態值 |
+
+### 4.3 建議標準化標籤
+
+在系統 UI、報告或對外文件中，建議採用下列雙語標籤：
+
+```
+三關價 (Fibonacci Pivot Bands)
+  中價 / Mid Pivot  = (yH + yL) / 2
+  上關 / Upper Band = Mid + 1.382 × (yH − yL)
+  下關 / Lower Band = Mid − 1.382 × (yH − yL)
+```
+
+1.382 係數來自黃金比例衍生值（$1 + \frac{1}{\phi} \approx 1.382$），因此「Fibonacci Pivot Bands」是國際交流時最準確、最易被量化社群理解的對應名稱。
