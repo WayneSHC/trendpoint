@@ -1,5 +1,5 @@
 """
-Range Navigator - 生產級資料庫安全與防注入模組 (Database Security Module)
+TrendPoint - 生產級資料庫安全與防注入模組 (Database Security Module)
 
 本模組落實安全設計原則 (Security-by-Design)：
 1. 針對 SQLite 的動態資料表名稱 (Table Name) 進行嚴格的白名單正則校驗。

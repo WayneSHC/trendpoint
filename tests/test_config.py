@@ -1,5 +1,5 @@
 """
-Range Navigator - 系統設定模組單元測試 (Configuration Model Tests)
+TrendPoint - 系統設定模組單元測試 (Configuration Model Tests)
 
 本模組對 config/config.py 的 load_config 與 save_config 功能進行單元測試，
 驗證配置檔讀寫、tickers 增刪更新與強型別校驗是否正常。

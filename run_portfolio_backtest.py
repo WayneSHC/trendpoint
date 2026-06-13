@@ -1,5 +1,5 @@
 """
-Range Navigator - 投資組合回測執行腳本 (Run Portfolio Backtest)
+TrendPoint - 投資組合回測執行腳本 (Run Portfolio Backtest)
 
 本腳本執行以下任務：
 1. 實例化 PortfolioBacktester。
@@ -17,7 +17,7 @@ def display_summary(summary: dict):
     格式化列印投資組合績效摘要。
     """
     print(f"\n==================================================")
-    print(f"Range Navigator 投資組合回測績效摘要")
+    print(f"TrendPoint 投資組合回測績效摘要")
     print(f"==================================================")
     print(f"  初始資金        : {summary['initial_capital']:.2f} 元")
     print(f"  最終淨值        : {summary['final_equity']:.2f} 元")
@@ -30,7 +30,7 @@ def display_summary(summary: dict):
 
 def run():
     print("=" * 60)
-    print("開始執行 Range Navigator 投資組合聯合同步回測任務...")
+    print("開始執行 TrendPoint 投資組合聯合同步回測任務...")
     print("=" * 60)
     
     try:

@@ -1,5 +1,5 @@
 """
-Range Navigator - 策略參數尋優模組 (Parameter Optimizer)
+TrendPoint - 策略參數尋優模組 (Parameter Optimizer)
 
 本模組使用高效的網格搜尋 (Grid Search) 演算法：
 1. 從本地 SQLite 資料庫載入時序數據。

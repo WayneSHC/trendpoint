@@ -1,5 +1,5 @@
 """
-Range Navigator - 多空階梯核心演算法模組 (Ladder System Core)
+TrendPoint - 多空階梯核心演算法模組 (Ladder System Core)
 
 本模組實現了多空階梯系統的核心交易邏輯與數據運算，包括：
 1. 平均真實波幅 (ATR) 的動態調整計算。

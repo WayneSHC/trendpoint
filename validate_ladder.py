@@ -1,5 +1,5 @@
 """
-Range Navigator - 核心演算法邏輯與時序偏誤驗證腳本 (Validation Script)
+TrendPoint - 核心演算法邏輯與時序偏誤驗證腳本 (Validation Script)
 
 本腳本用於模擬真實交易場景，驗證 `ladder_system.py` 中的數學公式與邏輯：
 1. 建立包含趨勢與震盪的模擬 K 線時序數據。
@@ -24,7 +24,7 @@ from ladder_system import (
 
 def run_validation():
     print("=" * 60)
-    print("開始執行 Range Navigator 核心演算法驗證...")
+    print("開始執行 TrendPoint 核心演算法驗證...")
     print("=" * 60)
 
     # 1. 產生模擬數據 (100 根 K 線，模擬多頭趨勢 -> 盤整 -> 跌破反轉)
@@ -148,7 +148,7 @@ def run_validation():
         print(f"  {log}")
         
     print("\n" + "=" * 60)
-    print("Range Navigator 所有核心演算法驗證全部通過！")
+    print("TrendPoint 所有核心演算法驗證全部通過！")
     print("=" * 60)
 
 if __name__ == "__main__":

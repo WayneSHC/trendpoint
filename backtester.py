@@ -1,5 +1,5 @@
 """
-Range Navigator - 歷史回測模擬核心 (Backtest Engine)
+TrendPoint - 歷史回測模擬核心 (Backtest Engine)
 
 本模組實現了：
 1. 逐筆 K 線 (Bar-by-Bar) 回測循環，嚴格防禦看前偏誤。

@@ -1,5 +1,5 @@
 """
-Range Navigator - 量化績效指標模組 (Performance Analytics)
+TrendPoint - 量化績效指標模組 (Performance Analytics)
 
 本模組提供資產管理級別的完整績效報表，僅看總報酬與 MDD 是不夠的：
 1. 年化報酬 (CAGR)、年化波動率

@@ -1,5 +1,5 @@
 """
-Range Navigator - 多標的投資組合回測引擎 (Portfolio Backtest Engine)
+TrendPoint - 多標的投資組合回測引擎 (Portfolio Backtest Engine)
 
 本模組實現了：
 1. 時間軸對齊 (Timeline Alignment)：對齊多檔標的之交易時間戳，解決除權息與暫停交易之資料缺失。

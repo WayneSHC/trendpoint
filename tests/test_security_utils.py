@@ -1,5 +1,5 @@
 """
-Range Navigator - 安全工具模組測試 (pytest)
+TrendPoint - 安全工具模組測試 (pytest)
 
 涵蓋:
 1. rate_limiter：限流節奏（超限時等待而非拋錯，保證批次抓取不中斷）

@@ -1,5 +1,5 @@
 """
-Range Navigator - 實時訊號監控與去重推播程式 (Signal Monitor)
+TrendPoint - 實時訊號監控與去重推播程式 (Signal Monitor)
 
 本程式支援：
 1. 讀取與計算最新 K 線指標（階梯軌跡、MSS/BOS 突破、三關價邊界）。
@@ -182,7 +182,7 @@ def check_new_signals(ticker: str, alert_mgr: AlertManager):
                 mark_alert_as_sent(ticker, latest_time, alert_type)
 
 def main():
-    parser = argparse.ArgumentParser(description="Range Navigator - Live Signal Monitor")
+    parser = argparse.ArgumentParser(description="TrendPoint - Live Signal Monitor")
     parser.add_argument("--test-alert", action="store_true", help="發送一筆測試訊息驗證通知管道配置")
     parser.add_argument("--once", action="store_true", help="僅執行單次訊號檢測，不進行循環輪詢")
     parser.add_argument("--interval", type=int, default=60, help="即時輪詢檢查間隔秒數 (預設 60 秒)")
@@ -197,7 +197,7 @@ def main():
     # 1. 執行測試發送
     if args.test_alert:
         print("開始執行推播測試...")
-        test_msg = "<b>【Range Navigator 系統測試】</b>\n這是一筆來自系統的測試警報！\n您的通知發送管道已成功配置。"
+        test_msg = "<b>【TrendPoint 系統測試】</b>\n這是一筆來自系統的測試警報！\n您的通知發送管道已成功配置。"
         alert_mgr.send_alert(test_msg)
         return
 

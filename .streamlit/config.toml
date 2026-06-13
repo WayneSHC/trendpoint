@@ -1,4 +1,4 @@
-# Range Navigator 工作站主題：亮色紙白基調，與 app.py 設計變數一致
+# TrendPoint 工作站主題：亮色紙白基調，與 app.py 設計變數一致
 [theme]
 base = "light"
 primaryColor = "#b07d10"

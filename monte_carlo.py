@@ -1,5 +1,5 @@
 """
-Range Navigator - 蒙地卡羅交易序列重抽模組 (Monte Carlo Trade Resampling)
+TrendPoint - 蒙地卡羅交易序列重抽模組 (Monte Carlo Trade Resampling)
 
 歷史回測的最大回撤只是「歷史上剛好出現的那一次」。把逐筆交易報酬
 打亂重抽數千次，觀察總報酬與最大回撤的分布，95 百分位的回撤才是

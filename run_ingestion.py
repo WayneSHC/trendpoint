@@ -1,10 +1,10 @@
 """
-Range Navigator - 數據下載與持久化測試腳本 (Run Ingestion)
+TrendPoint - 數據下載與持久化測試腳本 (Run Ingestion)
 
 本腳本執行以下任務：
 1. 建立儲存資料夾。
 2. 下載 0050.TW 與 2330.TW 的日線 (1年) 及 5分鐘線 (5天) 數據。
-3. 將結果分別儲存至 CSV 檔案與 SQLite 資料庫 (range_navigator.db)。
+3. 將結果分別儲存至 CSV 檔案與 SQLite 資料庫 (trendpoint.db)。
 4. 進行數據完整性驗證 (防呆欄位與空值檢查)。
 """
 
@@ -14,7 +14,7 @@ from config import load_config
 
 def run():
     print("=" * 60)
-    print("開始執行 Range Navigator 數據抓取任務...")
+    print("開始執行 TrendPoint 數據抓取任務...")
     print("=" * 60)
     
     # 載入強型別設定檔

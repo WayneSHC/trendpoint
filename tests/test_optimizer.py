@@ -1,5 +1,5 @@
 """
-Range Navigator - 參數尋優器單元測試 (pytest)
+TrendPoint - 參數尋優器單元測試 (pytest)
 
 本測試驗證 optimizer.py 的核心功能：
 1. 驗證尋優器初始化與設定檔載入。

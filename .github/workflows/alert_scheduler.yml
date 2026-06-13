@@ -1,4 +1,4 @@
-name: Range Navigator - 定時訊號監控通知
+name: TrendPoint - 定時訊號監控通知
 
 on:
   schedule:
@@ -28,10 +28,10 @@ jobs:
       - name: 還原 SQLite 資料庫快取
         uses: actions/cache@v3
         with:
-          path: range_navigator.db
-          key: range-navigator-db-${{ github.run_id }}
+          path: trendpoint.db
+          key: trendpoint-db-${{ github.run_id }}
           restore-keys: |
-            range-navigator-db-
+            trendpoint-db-
 
       - name: 執行實時訊號檢測與推播
         env:

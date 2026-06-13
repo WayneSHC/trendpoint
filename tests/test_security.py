@@ -1,5 +1,5 @@
 """
-Range Navigator - 資料庫安全模組單元測試 (Database Security Tests)
+TrendPoint - 資料庫安全模組單元測試 (Database Security Tests)
 
 本模組對 db_security.py 進行全面測試，驗證 SQL 注入防護與表名白名單正則的邊界防禦能力。
 """
