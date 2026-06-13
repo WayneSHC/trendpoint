@@ -5,3 +5,8 @@ venv/
 .DS_Store
 .idea/
 *.sqlite3
+*.db
+
+# 本地通知憑證與執行產物
+.env
+alerts.log
