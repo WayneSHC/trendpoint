@@ -2,9 +2,15 @@
 TrendPoint - 通知推播核心模組 (Alert Manager)
 
 本模組支援：
-1. 載入 .env 檔案中的 LINE Notify Token 或 Telegram Bot Token。
-2. 發送即時通知至 LINE Notify 或 Telegram。
+1. 載入 .env 檔案中的 LINE Messaging API 與 Telegram Bot Token。
+2. 發送即時通知至 LINE（Messaging API 推播）或 Telegram。
 3. 當無 Token 設定時，自動降級為本地 Mock 模式（美化終端機輸出與寫入 alerts.log 檔案）。
+
+註：舊版 LINE Notify 服務已於 2025-03-31 由 LINE 官方終止，
+原 https://notify-api.line.me/api/notify 端點已停止服務，
+故改用 LINE Messaging API 的 push message 端點推播。
+需設定 LINE_CHANNEL_ACCESS_TOKEN（頻道存取權杖）與
+LINE_TO（推播目標的 userId / groupId）兩項環境變數。
 """
 
 import os
@@ -36,47 +42,58 @@ def load_dotenv(filepath: str = ".env") -> Dict[str, str]:
 
 class AlertManager:
     """
-    通知推播管理器，整合 LINE Notify 與 Telegram Bot API。
+    通知推播管理器，整合 LINE Messaging API 與 Telegram Bot API。
     """
     def __init__(self, env_filepath: str = ".env"):
         # 優先載入系統環境變數，再載入 .env 檔案
         self.config = load_dotenv(env_filepath)
-        
-        self.line_token = os.environ.get("LINE_NOTIFY_TOKEN") or self.config.get("LINE_NOTIFY_TOKEN")
-        self.tg_token = os.environ.get("TELEGRAM_TOKEN") or self.config.get("TELEGRAM_TOKEN")
-        self.tg_chat_id = os.environ.get("TELEGRAM_CHAT_ID") or self.config.get("TELEGRAM_CHAT_ID")
-        
+
+        def _get(key: str) -> Optional[str]:
+            return os.environ.get(key) or self.config.get(key)
+
+        # LINE Messaging API：需頻道存取權杖與推播目標 ID
+        self.line_token = _get("LINE_CHANNEL_ACCESS_TOKEN")
+        self.line_to = _get("LINE_TO")
+        self.tg_token = _get("TELEGRAM_TOKEN")
+        self.tg_chat_id = _get("TELEGRAM_CHAT_ID")
+
+        # 兩個推播管道皆須完整配置才視為啟用
+        self.line_enabled = bool(self.line_token and self.line_to)
+        self.tg_enabled = bool(self.tg_token and self.tg_chat_id)
+
         # 判定是否處於 Mock 模式
-        self.is_mock = not (self.line_token or (self.tg_token and self.tg_chat_id))
+        self.is_mock = not (self.line_enabled or self.tg_enabled)
         
         # 記錄檔路徑
         self.log_filepath = "alerts.log"
 
-    def send_line_notify(self, message: str) -> bool:
+    def send_line_message(self, message: str) -> bool:
         """
-        發送通知至 LINE Notify。
+        透過 LINE Messaging API 的 push message 端點發送通知。
         """
-        if not self.line_token:
+        if not self.line_enabled:
             return False
-            
-        url = "https://notify-api.line.me/api/notify"
+
+        url = "https://api.line.me/v2/bot/message/push"
         headers = {
-            "Authorization": f"Bearer {self.line_token}"
+            "Authorization": f"Bearer {self.line_token}",
+            "Content-Type": "application/json",
         }
         payload = {
-            "message": message
+            "to": self.line_to,
+            "messages": [{"type": "text", "text": message}],
         }
-        
+
         try:
-            response = requests.post(url, headers=headers, data=payload, timeout=10)
+            response = requests.post(url, headers=headers, json=payload, timeout=10)
             if response.status_code == 200:
-                print("LINE Notify 發送成功。")
+                print("LINE 推播發送成功。")
                 return True
             else:
-                print(f"LINE Notify 發送失敗。狀態碼: {response.status_code}，原因: {response.text}")
+                print(f"LINE 推播發送失敗。狀態碼: {response.status_code}，原因: {response.text}")
                 return False
         except Exception as e:
-            print(f"LINE Notify 網路連線錯誤: {e}")
+            print(f"LINE 推播網路連線錯誤: {e}")
             return False
 
     def send_telegram(self, message: str) -> bool:
@@ -127,12 +144,12 @@ class AlertManager:
         # 2. 真實推播發送
         sent_ok = False
         if not self.is_mock:
-            if self.line_token:
-                # LINE Notify 不支援 HTML，發送純文字
-                sent_ok = self.send_line_notify(plain_message)
-            if self.tg_token and self.tg_chat_id:
+            if self.line_enabled:
+                # LINE Messaging API 文字訊息不解析 HTML，發送純文字
+                sent_ok = self.send_line_message(plain_message) or sent_ok
+            if self.tg_enabled:
                 # Telegram 支援 HTML 標記
-                sent_ok = self.send_telegram(message)
+                sent_ok = self.send_telegram(message) or sent_ok
             return sent_ok
         else:
             # 3. Mock 模式輸出 (美化終端機呈現)
