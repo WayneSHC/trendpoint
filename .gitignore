@@ -1,12 +1,22 @@
+# Python
 __pycache__/
 *.py[cod]
 env/
 venv/
+.pytest_cache/
+
+# OS / IDE
 .DS_Store
 .idea/
+
+# 本地通知憑證（Secrets）
+.env
+
+# 可再生成的產物（憲法原則 VI：版本庫只追蹤原始輸入與程式碼／規格）
 *.sqlite3
 *.db
-
-# 本地通知憑證與執行產物
-.env
-alerts.log
+*.log
+data/*_backtest_equity.csv
+data/*_backtest_trades.csv
+data/portfolio_backtest_equity.csv
+data/portfolio_backtest_trades.csv
