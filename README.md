@@ -5,7 +5,7 @@
 
 TrendPoint 把多空階梯系統（Ladder System）、ATR 波動率錨定、台指期三關價全域濾網與市場結構動力學（MSS / BOS）整合成一套可回測、可優化、可即時監控的策略框架，並以 Streamlit 打造機構級交易工作站儀表板。
 
-完整產品規格見 [`TrendPoint_OpenSpec.md`](TrendPoint_OpenSpec.md)；策略理論見 [`three_bands_theory.md`](three_bands_theory.md)。
+現行基準規格見 [`specs/001-ladder-core/spec.md`](specs/001-ladder-core/spec.md)；策略理論見 [`three_bands_theory.md`](three_bands_theory.md)；原始產品規格（歷史文件）見 [`TrendPoint_OpenSpec.md`](TrendPoint_OpenSpec.md)。
 
 ## 功能總覽
 
@@ -84,7 +84,7 @@ GitHub Actions（[`.github/workflows/alert_scheduler.yml`](.github/workflows/ale
 pytest -q
 ```
 
-CI 於每次 push 至 `main` 與每個 PR 自動執行測試套件（見 [`.github/workflows/tests.yml`](.github/workflows/tests.yml)）。
+CI 於每次 push 至 `main` 與每個 PR 自動執行測試套件（見 [`.github/workflows/tests.yml`](.github/workflows/tests.yml)），並額外驗證無 Numba 環境下的降級回退一致性。
 
 ## 專案結構
 
@@ -101,8 +101,23 @@ data_ingestion.py         K 線資料下載與清洗
 monitor_signals.py        即時訊號監控
 alerts.py                 LINE / Telegram 推播管理
 config/                   設定（config.yaml）
+specs/                    功能規格（Spec Kit）
 tests/                    pytest 測試套件
 ```
+
+## 規格驅動開發（Spec-Driven Development）
+
+本專案採用 [GitHub Spec Kit](https://github.com/github/spec-kit) 工作流：
+
+- **憲法**：[`.specify/memory/constitution.md`](.specify/memory/constitution.md) —
+  不可協商的工程原則（看前偏誤防禦、真實摩擦成本、驗收標準必須映射至測試等）。
+- **基準規格**：[`specs/001-ladder-core/spec.md`](specs/001-ladder-core/spec.md) —
+  現行系統的 as-built 規格。
+- **功能規格**：`specs/002` ~ `specs/006` — 待開發功能
+  （FVG 確認、空頭階梯、驗收測試套件、極端趨勢 k 值、離場體系補完）。
+
+新功能開發流程：`/speckit-specify` →（必要時 `/speckit-clarify`）→ `/speckit-plan` →
+`/speckit-tasks` → `/speckit-implement` → `/speckit-analyze`。
 
 ## 免責聲明
 
