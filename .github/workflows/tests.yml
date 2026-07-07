@@ -31,3 +31,10 @@ jobs:
 
       - name: 執行 pytest
         run: pytest -q
+
+      # 憲法原則 IV：Numba 為選配加速，降級後結果必須一致。
+      # 以無 Numba 環境重跑核心測試，驗證自動回退機制。
+      - name: 驗證無 Numba 環境之降級回退
+        run: |
+          pip uninstall -y numba
+          pytest -q tests/test_ladder_system.py tests/test_lookahead_bias.py
