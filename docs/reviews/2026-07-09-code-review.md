@@ -27,6 +27,11 @@
 
 ### 1.1 [Critical] portfolio_backtester.py:200 — 時間軸對齊使用 `.bfill()`，直接引入未來資料
 
+> **✅ 已修復（2026-07-09，commit aff5d18，PR #3）**：改為 `_align_frames()` 僅 ffill、
+> 進場迴圈加 NaN 防護、`tests/test_lookahead_bias.py` 新增兩個防禦測試（已驗證在舊實作
+> 上會 FAIL）。前後回測對照見 PR #3 留言：總報酬 6.73%→6.45%、MDD -3.80%→-4.47%、
+> 交易次數不變（差異全來自 inverse_vol 權重不再吃到回填的未來波動率）。
+
 `aligned_dfs[ticker] = df.reindex(global_idx).ffill().bfill()`。多標的聯集時間軸中，較晚上市的標的（例如 00919 於 2022 年掛牌，00631L 於 2014 年）在其上市日之前的所有 K 線會被 `.bfill()` 用**上市後第一根 K 線的未來數值**回填——包括 close、指標欄、`mss_signal`、`bos_signal`、`regime_ok`、三關價等訊號欄位。回測迴圈（第 212 行起）會對這些「偽造的歷史」判斷進場並成交，違反憲法第 I 條。
 
 **修法**：移除 `.bfill()`，改為 `df.reindex(global_idx).ffill()`，並在回測迴圈中以 `pd.isna(row['close'])` 或「該標的實際起始日」跳過尚未上市的 K 線；訊號欄位缺值一律視為無訊號（0 / False）。
