@@ -105,3 +105,106 @@ def test_no_lookahead_bias():
         assert abs(t_orig["shares"] - t_mod["shares"]) < 1e-5, f"第 {i} 筆交易的股數不一致"
         
     print("時序偏誤驗證通過：未來的價格變動不影響歷史既成之交易決策。")
+
+
+# ---------------------------------------------------------------------------
+# 投資組合回測：晚上市標的之看前偏誤防禦
+# 背景：portfolio_backtester 曾以 .bfill() 對齊多標的時間軸，導致晚上市標的
+# （如 00919，2022-10 掛牌）掛牌前的 K 線被「未來第一根真實資料」回填，
+# 進而可能於掛牌前進場、並以未來波動率參與 inverse_vol 權重計算。
+# ---------------------------------------------------------------------------
+
+def _make_portfolio_frame(dates: pd.DatetimeIndex) -> pd.DataFrame:
+    """
+    產生一組「每根 K 線都滿足多重確認進場條件」的合成指標資料：
+    紅 K（close>open）、高於當日開盤、振幅 > 1.2*ATR、MSS=1、
+    高於三關價中關且市況濾網通過。若此資料出現在掛牌前的時間軸上，
+    回測引擎「一定」會進場——因此可用來偵測 bfill 造成的掛牌前交易。
+    """
+    n = len(dates)
+    return pd.DataFrame({
+        "open": np.full(n, 100.0),
+        "close": np.full(n, 110.0),
+        "high": np.full(n, 120.0),
+        "low": np.full(n, 95.0),
+        "atr": np.full(n, 1.0),
+        "vwap": np.full(n, 105.0),
+        "daily_open": np.full(n, 100.0),
+        "mid_price": np.full(n, 50.0),
+        "regime_ok": np.full(n, True),
+        "mss_signal": np.full(n, 1),
+        "bos_signal": np.full(n, 0),
+        "chandelier_long": np.full(n, 90.0),
+        "realized_vol": np.full(n, 0.2),
+        "param_time_limit": np.full(n, 10),
+    }, index=dates)
+
+
+def test_portfolio_alignment_keeps_nan_before_listing():
+    """
+    _align_frames 對齊後：晚上市標的在掛牌前必須保留 NaN（不得被未來資料回填）；
+    掛牌後的停牌缺漏仍以 ffill 前值補齊。
+    """
+    from portfolio_backtester import PortfolioBacktester
+
+    dates_early = pd.bdate_range("2025-01-01", periods=10)
+    # 晚上市：只有最後 4 個交易日，且中間故意挖掉一天模擬停牌
+    dates_late = dates_early[-4:].delete(1)
+
+    early = _make_portfolio_frame(dates_early)
+    late = _make_portfolio_frame(dates_late)
+    late["close"] = [200.0, 202.0, 203.0]
+
+    aligned = PortfolioBacktester._align_frames({"EARLY": early, "LATE": late})
+
+    listing_date = dates_late[0]
+    pre_listing = aligned["LATE"].loc[aligned["LATE"].index < listing_date]
+
+    # 掛牌前一律 NaN——若此處出現數值即代表存在 bfill 看前偏誤
+    assert pre_listing["close"].isna().all(), \
+        "晚上市標的掛牌前被未來資料回填，違反憲法第 I 條看前偏誤防禦"
+    assert pre_listing["realized_vol"].isna().all(), \
+        "掛牌前的波動率被未來資料回填，將污染 inverse_vol 權重計算"
+
+    # 掛牌後的停牌日（被挖掉的那天）仍應以前值補齊
+    suspended_day = dates_early[-3]
+    assert aligned["LATE"].loc[suspended_day, "close"] == 200.0, \
+        "掛牌後的停牌缺漏應以 ffill 前值補齊"
+
+
+def test_portfolio_no_trades_before_listing():
+    """
+    行為層防禦：即使晚上市標的的資料「每根 K 線都會觸發進場」，
+    回測引擎也絕不能在其掛牌日之前對它成交任何一筆交易。
+    （在舊的 .bfill() 實作下，本測試會失敗。）
+    """
+    from portfolio_backtester import PortfolioBacktester
+
+    dates_early = pd.bdate_range("2025-01-01", periods=60)
+    dates_late = dates_early[-20:]
+    listing_date = dates_late[0]
+
+    frames = {
+        "EARLY.TW": _make_portfolio_frame(dates_early),
+        "LATE.TW": _make_portfolio_frame(dates_late),
+    }
+
+    pb = PortfolioBacktester()
+    pb.tickers = list(frames.keys())
+    pb._load_and_calculate_indicators = lambda: frames
+
+    results = pb.run_portfolio_backtest()
+    trades = results["trades"]
+
+    assert not trades.empty, "合成資料設計為必定進場，卻無任何交易——測試前提失效"
+
+    late_trades = trades[trades["ticker"] == "LATE.TW"]
+    phantom = late_trades[late_trades["datetime"] < listing_date]
+    assert phantom.empty, (
+        f"偵測到晚上市標的於掛牌日 {listing_date.date()} 前的幽靈交易 "
+        f"{len(phantom)} 筆——時間軸對齊存在 bfill 看前偏誤"
+    )
+
+    # 交叉驗證：早上市標的在同一期間應正常交易（確保防護沒有誤殺）
+    early_trades = trades[trades["ticker"] == "EARLY.TW"]
+    assert not early_trades.empty, "掛牌前防護誤殺了正常標的的進場"
