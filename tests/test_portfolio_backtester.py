@@ -52,6 +52,74 @@ def test_timeline_alignment_logic():
     # 標的 B 掛牌前 (2026-05-20) 必須保留 NaN，不得被未來值 200.0 回填
     assert pd.isna(aligned_b.loc["2026-05-20", "close"])
 
+def _make_indicator_df(n: int = 30, price: float = 100.0) -> pd.DataFrame:
+    """
+    建立一個具備回測迴圈所需全部指標欄位的模擬 DataFrame。
+    mid_price 設為遠高於 close，確保三關價濾網不通過、不會觸發進場。
+    """
+    idx = pd.date_range("2026-01-01", periods=n, freq="D")
+    return pd.DataFrame({
+        "open": price,
+        "high": price + 1.0,
+        "low": price - 1.0,
+        "close": price,
+        "atr": 1.0,
+        "vwap": price,
+        "mss_signal": 0,
+        "bos_signal": 0,
+        "ladder": price,
+        "chandelier_long": price - 2.0,
+        "chandelier_short": price + 2.0,
+        "daily_open": price,
+        "mid_price": price * 10.0,
+        "upper_price": price * 10.0,
+        "lower_price": 0.0,
+        "regime_ok": False,
+        "realized_vol": 0.01,
+        "param_time_limit": 5,
+    }, index=idx)
+
+def test_missing_ticker_filtered_with_warning(monkeypatch, capsys):
+    """
+    config 中的標的若在資料庫無對應資料表（_load_and_calculate_indicators
+    回傳的 dict 缺少該標的），run_portfolio_backtest 應：
+    1. 不拋出 KeyError；
+    2. 將該標的自 self.tickers 過濾掉；
+    3. 印出包含缺失標的代號的警告訊息。
+    """
+    pb = PortfolioBacktester()
+    pb.tickers = ["AAA.TW", "BBB.TW"]
+    pb.allocation = "equal"
+
+    # 模擬 BBB.TW 在 trendpoint.db 沒有資料表而被靜默跳過
+    monkeypatch.setattr(
+        pb, "_load_and_calculate_indicators",
+        lambda: {"AAA.TW": _make_indicator_df()}
+    )
+
+    res = pb.run_portfolio_backtest()
+
+    assert pb.tickers == ["AAA.TW"], "缺資料的標的應自 tickers 過濾"
+    out = capsys.readouterr().out
+    assert "BBB.TW" in out, "警告訊息應包含缺失標的代號"
+    assert "警告" in out, "應印出警告訊息"
+
+    df_equity = res["equity_curve"]
+    assert not df_equity.empty
+    # 全程無進場，淨值應恆等於初始資金
+    assert (df_equity["equity"] == pb.initial_capital).all()
+
+def test_all_tickers_missing_raises(monkeypatch):
+    """
+    所有標的皆無資料時，應維持既有行為：拋出帶清楚訊息的 ValueError。
+    """
+    pb = PortfolioBacktester()
+    pb.tickers = ["AAA.TW", "BBB.TW"]
+    monkeypatch.setattr(pb, "_load_and_calculate_indicators", lambda: {})
+
+    with pytest.raises(ValueError, match="無法執行回測"):
+        pb.run_portfolio_backtest()
+
 def test_portfolio_backtest_execution():
     """
     測試 PortfolioBacktester 的聯合成績效回測執行。
