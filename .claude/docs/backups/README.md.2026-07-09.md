@@ -119,14 +119,6 @@ tests/                    pytest 測試套件
 新功能開發流程：`/speckit-specify` →（必要時 `/speckit-clarify`）→ `/speckit-plan` →
 `/speckit-tasks` → `/speckit-implement` → `/speckit-analyze`。
 
-## 授權（License）
-
-本專案以 [Mozilla Public License 2.0](LICENSE)（MPL-2.0）授權。
-
-- 你可以自由使用、修改、散布本專案，包括整合進商業或閉源產品。
-- 但**修改過的 MPL 授權檔案**在散布時必須以 MPL-2.0 公開原始碼（檔案層級 copyleft）。
-- 注意：`data/` 內的市場資料快取來自 Yahoo Finance，其再散布權利不在本授權涵蓋範圍內。
-
 ## 免責聲明
 
 本專案為交易研究與決策輔助工具，所有訊號與回測結果僅供參考，不構成投資建議。實際交易風險自負。
