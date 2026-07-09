@@ -207,7 +207,14 @@ class PortfolioBacktester:
         
         if not ticker_dfs:
             raise ValueError("所有標的數據皆為空，無法執行回測。")
-            
+
+        # 資料庫缺少資料表的標的會被 _load_and_calculate_indicators 跳過，
+        # 必須同步自 tickers 過濾，否則回測迴圈取 aligned_dfs[t] 會 KeyError。
+        missing = [t for t in self.tickers if t not in ticker_dfs]
+        if missing:
+            print(f"警告：以下標的在資料庫中無資料，已自本次回測排除：{', '.join(missing)}")
+            self.tickers = [t for t in self.tickers if t in ticker_dfs]
+
         # 1. 建立對齊之全域時間軸（僅 ffill；上市前保留 NaN，禁止 bfill）
         aligned_dfs = self._align_frames(ticker_dfs)
         global_idx = next(iter(aligned_dfs.values())).index
