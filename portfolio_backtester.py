@@ -180,6 +180,24 @@ class PortfolioBacktester:
 
         return weights
 
+    @staticmethod
+    def _align_frames(ticker_dfs: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
+        """
+        將多標的 DataFrame 對齊至全域時間軸聯集。
+
+        缺值僅允許前向補值（ffill，處理停牌／缺 K 線）；上市前的空缺一律保留
+        NaN——嚴禁 bfill，否則晚上市標的（如 00919）會被未來資料回填，
+        構成看前偏誤（憲法第 I 條）。上市前的 NaN 由回測迴圈的進場防護跳過，
+        波動率權重則由 _compute_weights 的等權重回退機制處理。
+        """
+        all_indices = [df.index for df in ticker_dfs.values()]
+        global_idx = all_indices[0]
+        for idx in all_indices[1:]:
+            global_idx = global_idx.union(idx)
+        global_idx = global_idx.sort_values()
+
+        return {t: df.reindex(global_idx).ffill() for t, df in ticker_dfs.items()}
+
     def run_portfolio_backtest(self) -> Dict[str, Any]:
         """
         執行多標的投資組合對齊回測
@@ -190,19 +208,10 @@ class PortfolioBacktester:
         if not ticker_dfs:
             raise ValueError("所有標的數據皆為空，無法執行回測。")
             
-        # 1. 建立對齊之全域時間軸
-        all_indices = [df.index for df in ticker_dfs.values()]
-        global_idx = all_indices[0]
-        for idx in all_indices[1:]:
-            global_idx = global_idx.union(idx)
-            
-        global_idx = global_idx.sort_values()
-        
-        # 對齊各標的 DataFrame，並以前值補齊缺失 (例如停牌)
-        aligned_dfs = {}
-        for ticker, df in ticker_dfs.items():
-            aligned_dfs[ticker] = df.reindex(global_idx).ffill().bfill()
-            
+        # 1. 建立對齊之全域時間軸（僅 ffill；上市前保留 NaN，禁止 bfill）
+        aligned_dfs = self._align_frames(ticker_dfs)
+        global_idx = next(iter(aligned_dfs.values())).index
+
         # 2. 初始化帳戶狀態
         cash = self.initial_capital
         shares: Dict[str, float] = {t: 0.0 for t in self.tickers}
@@ -309,7 +318,12 @@ class PortfolioBacktester:
                     df_t = aligned_dfs[t]
                     row = df_t.iloc[i]
                     prev_row = df_t.iloc[i - 1]
-                    
+
+                    # 上市前防護：該標的尚無真實 K 線（對齊後為 NaN），一律跳過，
+                    # 不得依賴 NaN 比較恰好為 False 的隱性行為
+                    if pd.isna(row['close']) or pd.isna(prev_row['close']):
+                        continue
+
                     # 全域濾網：三關價 + 市況濾網 (ADX/長均線/ER)
                     global_ok = (row['close'] > row['mid_price']) and bool(row['regime_ok'])
                     
