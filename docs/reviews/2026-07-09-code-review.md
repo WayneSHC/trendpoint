@@ -109,6 +109,8 @@
 
 **修法**：公開前以 `git filter-repo --path range_navigator.db --path trendpoint.db --path alerts.log --invert-paths` 清史後 force-push；或更簡單——以目前 HEAD 內容開新的乾淨 repo（squash 全史）發布。
 
+> **✅ 已修復（2026-07-10）**：以 `git filter-repo` 自全史移除 `range_navigator.db`、`trendpoint.db`、`alerts.log`、`Range_Navigator_OpenSpec.md` 與整個 `data/` 目錄後 force-push。改寫後經 `git rev-list --objects --all` 驗證歷史零殘留、HEAD 檔案樹除移除檔案外逐檔一致。**殘餘風險**：GitHub 伺服器端可能仍快取舊 commit（以舊 SHA 直連可及），徹底移除需聯絡 GitHub Support 執行 GC；另任何既有 clone/fork 仍保有舊史。
+
 ### 2.2 [Medium] optimizer.py:45 — f-string 拼接 SQL 表名，繞過 db_security 白名單
 
 `pd.read_sql_query(f"SELECT * FROM {table_name}", conn)`，`table_name` 由 config tickers 組出，未經 `validate_table_name` 校驗。實際可利用性低（輸入來自本地 config），但違反憲法安全條款「SQLite 存取一律使用 db_security.py 之既有防護，禁止字串拼接 SQL」，且專案其他處（portfolio_backtester.py:72、app.py:355-356）都正確使用了白名單。
@@ -147,6 +149,8 @@ repo 中沒有任何授權條款（`README.md` 亦未宣告）。沒有 LICENSE 
 
 **修法**：將 `data/*.csv` 自 repo 移除並加入 `.gitignore`（`data/*.csv`），README 引導使用者以 `python run_ingestion.py` 自行抓取；若測試需要固定資料，改用程式生成的合成 fixture（tests/test_lookahead_bias.py 已示範此作法）。
 
+> **✅ 已修復（2026-07-10）**：`data/` 全目錄（含所有 CSV）已自 HEAD 與全部歷史移除（與 2.1 同一次 filter-repo），`.gitignore` 加入 `data/`。測試與 CI 經 grep 確認不依賴 data/ 檔案。本地快取檔不受影響，`run_ingestion.py` 可隨時重建。
+
 ### 3.3 [Medium] 多空階梯優化與實戰策略.txt／_extracted.txt、extracted_images/*.png（9 張）、三 bands 文件 — 內容來源與著作權未確認，不宜直接公開
 
 `extract_math.py`/`map_images.py` 顯示這兩份 txt 與 extracted_images/ 是從一份不在 repo 內的 `多空階梯優化與實戰策略.docx` 抽取的文字與圖片。該文件為「深度優化研究報告」體裁，來源**未確認**（自有創作、AI 研究工具產出或第三方文獻皆有可能）；其中圖片若引用自第三方圖表／書籍截圖，公開即構成侵權散布。`three_bands_theory.md` 為對「台指期三關價」（源自台灣期貨交易社群的第三方交易理論）的整理，文字若為自行撰寫則風險低。`產品需求文件 (PRD).txt` 為內部產品文件，公開與否屬意願問題。
@@ -161,11 +165,15 @@ repo 中沒有任何授權條款（`README.md` 亦未宣告）。沒有 LICENSE 
 
 歷史含 1.1MB 二進位資料庫、alerts.log、舊專案名 `range_navigator.db`。目前追蹤中的檔案樹經 grep 確認**已無** Range Navigator 命名殘留（僅未追蹤的 `.claude/settings.local.json` 留有改名指令記錄，該檔未入版控，無虞）。修法見 2.1。
 
+> **✅ 已修復（2026-07-10）**：見 2.1——歷史已清理並 force-push，舊專案名檔案（`range_navigator.db`、`Range_Navigator_OpenSpec.md`）已一併自歷史移除。
+
 ### 4.2 [Medium] data/*_5m.csv — 追蹤了僅 5 天滾動窗的即時性資料，屬會腐化的可再生產物
 
 5 分鐘線 CSV（每檔約 244 列）來自 `period="5d"` 抓取，入庫當下就開始過期，對任何 clone 者都是「舊的 5 天」。憲法第 VI 條要求「版本庫只追蹤原始輸入與程式碼／規格」，這些檔案是 `run_ingestion.py` 一鍵可再生成的產物（daily CSV 同理，且與 3.2 的 ToS 問題重疊）。
 
 **修法**：與 3.2 一併移除所有 `data/*.csv`，`.gitignore` 加入 `data/*.csv`。
+
+> **✅ 已修復（2026-07-10）**：見 3.2。
 
 ### 4.3 [Low] extract_math.py:31-35、map_images.py:34-37 — 一次性 docx 抽取腳本引用 repo 中不存在的檔案
 

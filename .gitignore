@@ -16,7 +16,7 @@ venv/
 *.sqlite3
 *.db
 *.log
-data/*_backtest_equity.csv
-data/*_backtest_trades.csv
-data/portfolio_backtest_equity.csv
-data/portfolio_backtest_trades.csv
+
+# 市場資料快取一律不進版本庫：可由 run_ingestion.py 重新下載，
+# 且 Yahoo Finance 資料公開再散布有授權疑慮（health review 發現 2.x）
+data/
