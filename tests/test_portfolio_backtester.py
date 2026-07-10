@@ -1,3 +1,7 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 """
 TrendPoint - 投資組合回測引擎與資金分配單元測試 (pytest)
 
@@ -24,29 +28,29 @@ def test_portfolio_backtester_initialization():
 
 def test_timeline_alignment_logic():
     """
-    測試多標的時間軸對齊與 ffill/bfill 插補邏輯。
+    測試多標的時間軸對齊與插補邏輯（_align_frames）：
+    掛牌後缺漏以 ffill 前值補齊；掛牌前一律保留 NaN，禁止 bfill
+    （bfill 會把未來資料回填至掛牌前，構成看前偏誤，
+    行為層防禦見 tests/test_lookahead_bias.py）。
     """
-    # 建立模擬的標的 A 與 標的 B 資料，故意讓時間戳不完全一致
+    # 建立模擬的標的 A 與 標的 B 資料，故意讓時間戳不完全一致：
+    # B 較晚「掛牌」（首日 05-21），且 A 在 05-22 缺一根（模擬停牌）
     dates_a = pd.to_datetime(["2026-05-20", "2026-05-21", "2026-05-23"])
     dates_b = pd.to_datetime(["2026-05-21", "2026-05-22", "2026-05-23"])
-    
+
     df_a = pd.DataFrame({"close": [100.0, 101.0, 102.0]}, index=dates_a)
     df_b = pd.DataFrame({"close": [200.0, 201.0, 202.0]}, index=dates_b)
-    
-    # 模擬 PortfolioBacktester 中的時間軸對齊與插補過程
-    global_idx = df_a.index.union(df_b.index).sort_values()
-    
+
+    aligned = PortfolioBacktester._align_frames({"A": df_a, "B": df_b})
+    aligned_a, aligned_b = aligned["A"], aligned["B"]
+
     # 斷言合併後的時間戳完整性 (包含 20, 21, 22, 23 號)
-    assert len(global_idx) == 4
-    
-    aligned_a = df_a.reindex(global_idx).ffill().bfill()
-    aligned_b = df_b.reindex(global_idx).ffill().bfill()
-    
-    # 驗證插補結果：
+    assert len(aligned_a.index) == 4
+
     # 標的 A 在 2026-05-22 應以 2026-05-21 的值 (101.0) 進行 ffill 插補
     assert aligned_a.loc["2026-05-22", "close"] == 101.0
-    # 標的 B 在 2026-05-20 應以 2026-05-21 的值 (200.0) 進行 bfill 插補
-    assert aligned_b.loc["2026-05-20", "close"] == 200.0
+    # 標的 B 掛牌前 (2026-05-20) 必須保留 NaN，不得被未來值 200.0 回填
+    assert pd.isna(aligned_b.loc["2026-05-20", "close"])
 
 def test_portfolio_backtest_execution():
     """
