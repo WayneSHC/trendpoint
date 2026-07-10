@@ -143,6 +143,8 @@ repo 中沒有任何授權條款（`README.md` 亦未宣告）。沒有 LICENSE 
 
 **修法**：加入明確的 OSI 授權（MIT／Apache-2.0 為常見選擇；Apache-2.0 額外含專利授權條款），並在 README 標註。同時建議在 README/LICENSE 附「非投資建議」免責聲明（交易系統開源的慣例防護）。
 
+> **✅ 已修復（2026-07-09，PR #3）**：採 MPL-2.0（經第二意見確認），官方全文 LICENSE 已加入、README 增列授權章節與資料來源註記、33 個 .py 檔加上 MPL 檔頭。
+
 ### 3.2 [High] data/*.csv（10 檔，共 10,853 列）— 公開再散布 yfinance 抓取之 Yahoo Finance 市場資料有 ToS 疑慮
 
 `data/0050_TW_daily.csv` 等 10 檔為 yfinance 下載的 Yahoo Finance OHLCV（daily 最長回溯至 2016 年、約 2,400 列/檔）。Yahoo 服務條款一貫禁止對其資料的再散布／商業利用，yfinance 官方文件也明示「僅供個人研究用途、不得再散布」（法律結論**未確認**——各法域對事實性市場資料的著作權保護不一，台股原始價量另涉 TWSE 資訊使用條款，但 ToS 違約風險與平台下架風險是實際存在的）。git 歷史中的 SQLite 資料庫（見 2.1）含同類資料，需一併處理。
@@ -156,6 +158,8 @@ repo 中沒有任何授權條款（`README.md` 亦未宣告）。沒有 LICENSE 
 `extract_math.py`/`map_images.py` 顯示這兩份 txt 與 extracted_images/ 是從一份不在 repo 內的 `多空階梯優化與實戰策略.docx` 抽取的文字與圖片。該文件為「深度優化研究報告」體裁，來源**未確認**（自有創作、AI 研究工具產出或第三方文獻皆有可能）；其中圖片若引用自第三方圖表／書籍截圖，公開即構成侵權散布。`three_bands_theory.md` 為對「台指期三關價」（源自台灣期貨交易社群的第三方交易理論）的整理，文字若為自行撰寫則風險低。`產品需求文件 (PRD).txt` 為內部產品文件，公開與否屬意願問題。
 
 **修法**：逐一確認著作權歸屬——確定自有者保留並在檔頭標註作者與授權；無法確認者（尤其 extracted_images/*.png 與兩份 txt）在公開前移出 repo（連同 git 歷史）。內部文件建議移至 `docs/` 或移除。
+
+> **✅ 已修復（2026-07-10）**：作者確認該 docx 為本人綜合自身研究、與 LLM AI 研究工具共同產出之自有內容。逐張檢視 extracted_images/*.png 後確認 9 張全部為數學公式渲染圖（ATR/TR/吊燈/三關價等公開交易公式），無任何第三方圖表或截圖。處置：公式以 LaTeX 文字重新表達、全文轉為 `docs/ladder-optimization-research.md` 並加來源聲明檔頭；兩份 txt 與 extracted_images/ 移出版控（內容屬自有，故留存於 git 歷史無虞）；`three_bands_theory.md` 加註「對公開理論之自行整理」聲明。
 
 ---
 
@@ -181,11 +185,15 @@ repo 中沒有任何授權條款（`README.md` 亦未宣告）。沒有 LICENSE 
 
 **修法**：連同其產物（兩份 txt、extracted_images/）一併移除；若想保留工具價值，改為接受 CLI 參數的通用腳本並移至 `tools/`。
 
+> **✅ 已修復（2026-07-10）**：`extract_math.py`、`map_images.py` 與其全部產物已移出版控（見 3.3）。
+
 ### 4.4 [Low] 根目錄文件雜訊 — `產品需求文件 (PRD).txt` 檔名含空格與全形括號、TrendPoint_OpenSpec.md 自述為「歷史文件」
 
 檔名含空格／中文括號對跨平台腳本與部分 CI 工具不友善；根目錄堆放歷史文件降低開源第一印象的專業度。
 
 **修法**：建立 `docs/` 收納（如 `docs/prd.md`、`docs/openspec.md`），檔名改 ASCII kebab/snake case。
+
+> **✅ 部分修復（2026-07-10）**：`產品需求文件 (PRD).txt` 屬內部文件，已移出版控（本地保留、.gitignore 防再入）；研究文件改以 `docs/ladder-optimization-research.md` 收納。`TrendPoint_OpenSpec.md` 仍在根目錄，是否移入 docs/ 待使用者決定。
 
 > 正面觀察（值得保留的優點）：`.gitignore` 已正確涵蓋 `.env`、`*.db`、`*.log` 與回測產物；tests/ 共 41 個測試，含專門的 look-ahead 篡改測試（test_lookahead_bias.py）、SQL 注入白名單測試（test_security.py）與 rate-limiter/lockout 測試；CI 同時驗證 Numba 降級路徑（tests.yml:37-40），與憲法第 IV 條對齊。
 
