@@ -20,7 +20,7 @@ Streamlit 儀表板，可回測/尋優/即時推播。Python 3.10+，pandas/nump
    檔案操作優先用 Read/Edit/Write/Grep/Glob 工具，不用 cat/sed/echo 重導向。
 2. **指揮官不下場**：大量讀取（>2 個整檔）、掃 repo、查網頁、批次改檔，
    一律派 subagent，主對話只收結論與 `檔案:行號`。大檔（`app.py` 49KB、
-   `多空階梯*.txt`）先 Grep 定位、再用 offset/limit 讀區段。
+   `docs/ladder-optimization-research.md`）先 Grep 定位、再用 offset/limit 讀區段。
 3. **交易邏輯三條紅線**（來自 `.specify/memory/constitution.md`，完整版看該檔）：
    - 看前偏誤：rolling 結構計算必須 `.shift(1)`；第 N 根出訊號、第 N+1 根開盤成交；
      新訊號必須在 `tests/test_lookahead_bias.py` 加防禦測試。
@@ -51,7 +51,8 @@ python monitor_signals.py --once   # 單次訊號檢測與推播
 - UI：`app.py`（Streamlit，禁止內嵌演算法邏輯）
 - 規格：`specs/001` 為 as-built 基準；`specs/002~006` 待開發；
   新功能走 Spec Kit：`/speckit-specify` → `/speckit-plan` → `/speckit-tasks` → `/speckit-implement`
-- 理論：`three_bands_theory.md`；歷史文件：`TrendPoint_OpenSpec.md`（勿當現行規格）
+- 理論：`three_bands_theory.md`、`docs/ladder-optimization-research.md`（階梯優化研究，
+  原 docx 之正式版）；歷史文件：`TrendPoint_OpenSpec.md`（勿當現行規格）
 
 ## 授權
 

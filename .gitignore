@@ -20,3 +20,8 @@ venv/
 # 市場資料快取一律不進版本庫：可由 run_ingestion.py 重新下載，
 # 且 Yahoo Finance 資料公開再散布有授權疑慮（health review 發現 2.x）
 data/
+
+# 本地來源文件（內容已轉換為 docs/*.md 或屬內部文件，不進公開 repo）
+多空階梯*.txt
+產品需求文件*
+local_docs/
