@@ -70,6 +70,11 @@ git 出現詭異損毀時第一個懷疑 Drive 同步衝突（找 `*conflicted c
 
 - 2026-07-09（本 session）：無未完成交接。制度檔 A–G 全數落檔，
   TrendPoint 開源健檢完成（`docs/reviews/2026-07-09-code-review.md`），
-  MPL-2.0 LICENSE 已加入。待使用者決定的事項：
-  (1) 是否搬離 Google Drive；(2) 是否裁剪 plugin 清單（見 harness-diagnosis.md）；
-  (3) code review 中 High 以上 finding 的修復排程。
+  MPL-2.0 LICENSE 已加入。
+- 2026-07-10 更新：Critical（bfill 看前偏誤）與 High 2.1/3.2/4.1/4.2
+  （git 歷史清理 + data/ 移出版控）皆已修復；PR #3、#4 已合併；
+  git 歷史已以 filter-repo 改寫並 force-push——**任何 2026-07-10 前的
+  clone/fork 與新 main 歷史不相容，必須重新 clone**（本地主 repo 已同步）。
+  仍待使用者決定：(1) 是否搬離 Google Drive；(2) 是否裁剪 plugin 清單
+  （見 harness-diagnosis.md）；(3) 剩餘 finding（High 3.3 文件著作權確認、
+  Medium 以下）的修復排程。
