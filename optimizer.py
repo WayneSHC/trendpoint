@@ -47,54 +47,75 @@ class ParameterOptimizer:
         # 憲法安全條款：SQLite 存取一律走 db_security 白名單，禁止逕行拼接 SQL
         return safe_load_db_data(db_path, table_name)
 
-    def optimize_ticker(self, ticker: str) -> Tuple[Dict[str, Any], float]:
+    @staticmethod
+    def _calmar(summary: Dict[str, Any]) -> float:
+        """Calmar Ratio = 總報酬率 / |MDD|（防禦 MDD 為 0）"""
+        mdd_floor = max(abs(summary["max_drawdown"]), 0.0001)
+        return summary["total_return"] / mdd_floor
+
+    def optimize_ticker(self, ticker: str,
+                        holdout_ratio: float = 0.25
+                        ) -> Tuple[Dict[str, Any], float, Dict[str, Any]]:
         """
-        針對特定標的進行網格尋優
+        針對特定標的進行網格尋優。
+
+        防過擬合（憲法 I）：網格搜尋只允許看前 (1 - holdout_ratio) 的
+        訓練段；最佳參數再於最後 holdout_ratio 的 hold-out 段驗證。
+        全樣本尋優等於「看過全部答案」，其績效是樣本內成績，
+        不得作為寫回 config 的依據。
+
         搜尋空間：
         - atr_period: [10, 12, 14, 16, 18, 20]
         - ladder_k: [1.5, 2.0, 2.5, 3.0, 3.5]
+
+        回傳：(best_params, 訓練段 Calmar, hold-out 段 summary)
         """
         df = self._load_data(ticker)
         if df.empty:
             raise ValueError(f"標的 {ticker} 的歷史數據為空，無法尋優。")
-            
+
+        split = int(len(df) * (1.0 - holdout_ratio))
+        df_train = df.iloc[:split]
+        df_holdout = df.iloc[split:]
+
+        if len(df_holdout) < 60:
+            raise ValueError(
+                f"標的 {ticker} 的 hold-out 段僅 {len(df_holdout)} 根 K 線（<60），"
+                f"不足以進行誠實的樣本外驗證。請先累積更長的歷史數據。"
+            )
+
         print(f"\n[開始對 {ticker} 進行參數尋優]")
-        print(f"時序長度: {len(df)} 根 K 線")
-        
+        print(f"時序長度: {len(df)} 根 K 線（訓練 {len(df_train)} / hold-out {len(df_holdout)}）")
+
         # 搜尋空間定義
         atr_periods = [10, 12, 14, 16, 18, 20]
         ladder_ks = [1.5, 2.0, 2.5, 3.0, 3.5]
-        
+
         best_params = {}
         best_calmar = -np.inf
         best_summary = {}
-        
+
         # 使用現有回測引擎
         engine = BacktestEngine(config=self.cfg)
-        
+
         for period in atr_periods:
             for k in ladder_ks:
-                # 執行單次歷史回測
+                # 網格搜尋只在訓練段執行
                 res = engine.run_backtest(
-                    df=df,
+                    df=df_train,
                     atr_period=period,
                     k=k,
                     ch_period=self.cfg.strategy.default.chandelier_period,
                     ch_multiplier=self.cfg.strategy.default.chandelier_mult,
                     time_limit=self.cfg.strategy.default.time_limit
                 )
-                
+
                 summary = res["summary"]
                 if not summary:
                     continue
-                    
-                total_return = summary["total_return"]
-                mdd = abs(summary["max_drawdown"])
-                
-                # 計算 Calmar Ratio (防禦 MDD 為 0 的情況)
-                mdd_floor = max(mdd, 0.0001)
-                calmar = total_return / mdd_floor
-                
+
+                calmar = self._calmar(summary)
+
                 # 若 Calmar 較佳，則記錄
                 if calmar > best_calmar:
                     best_calmar = calmar
@@ -106,11 +127,34 @@ class ParameterOptimizer:
                         "time_limit": self.cfg.strategy.default.time_limit
                     }
                     best_summary = summary
-                    
+
+        # 最佳參數於 hold-out 段驗證（此段從未參與尋優）
+        holdout_res = engine.run_backtest(
+            df=df_holdout,
+            atr_period=best_params["atr_period"],
+            k=best_params["ladder_k"],
+            ch_period=best_params["chandelier_period"],
+            ch_multiplier=best_params["chandelier_mult"],
+            time_limit=best_params["time_limit"]
+        )
+        holdout_summary = holdout_res["summary"]
+
         print(f"最佳參數組合 -> ATR 週期: {best_params['atr_period']}, 階梯乘數 k: {best_params['ladder_k']}")
-        print(f"最佳績效績效 -> 報酬率: {best_summary['total_return']*100:.2f}%, MDD: {best_summary['max_drawdown']*100:.2f}%, 卡爾瑪比率: {best_calmar:.2f}")
-        
-        return best_params, best_calmar
+        print(f"訓練段（樣本內）  -> 報酬率: {best_summary['total_return']*100:.2f}%, "
+              f"MDD: {best_summary['max_drawdown']*100:.2f}%, Calmar: {best_calmar:.2f}")
+        print(f"hold-out（樣本外）-> 報酬率: {holdout_summary['total_return']*100:.2f}%, "
+              f"MDD: {holdout_summary['max_drawdown']*100:.2f}%, "
+              f"Calmar: {self._calmar(holdout_summary):.2f}")
+
+        return best_params, best_calmar, holdout_summary
+
+    @staticmethod
+    def holdout_passes(holdout_summary: Dict[str, Any]) -> bool:
+        """
+        hold-out 驗證閘門：樣本外總報酬必須為正才允許把參數寫回 config。
+        （樣本外虧損代表參數大概率是對訓練段雜訊的過擬合。）
+        """
+        return bool(holdout_summary) and holdout_summary.get("total_return", 0.0) > 0.0
 
     def save_override_to_yaml(self, ticker: str, params: Dict[str, Any]):
         """
