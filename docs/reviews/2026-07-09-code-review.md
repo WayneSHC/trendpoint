@@ -55,6 +55,8 @@
 
 **修法**：判斷最後一根 K 線的時間戳；若 `now < bar_time + interval`（未收盤）則改用 `df.iloc[-2]` 作為「最新已收盤 K 線」。
 
+> **✅ 已修復（2026-07-11）**：照修法實作為可測試的 `select_closed_bar_indices()`——now 未達末根時間＋K 線間隔即改用倒數第二根；附 2 個單元測試。
+
 ### 1.4 [Medium] data_ingestion.py:84 — 資料清洗使用 `.ffill().bfill()`，bfill 屬未來值回填
 
 `cleaned_df = cleaned_df.ffill().bfill()` 中的 `.bfill()` 會把序列開頭的缺值用未來資料回填。憲法第 VI 條規定「遇缺漏 K 線採向前填補並記錄警告」，並未允許向後填補；且此處填補時**沒有記錄任何警告**。
@@ -68,6 +70,8 @@
 `optimize_ticker` 在**全部歷史**上尋優，`save_override_to_yaml` 把結果寫進 `config/config.yaml` 的 `ticker_overrides`，此後所有回測、儀表板 KPI 與即時訊號都用這組「看過全部答案」的參數，展示的績效實質上是樣本內成績。專案已有 walk_forward.py 正確處理此問題，但 optimizer 主流程未整合。
 
 **修法**：在 optimizer 輸出與 README/UI 中明確標註「此為樣本內參數」；建議 `run_optimization.py` 預設改走 WalkForwardAnalyzer，或至少保留最後 20-30% 資料作為 hold-out 驗證後才寫回。
+
+> **✅ 已修復（2026-07-11）**：採 hold-out 方案——網格搜尋只看前 75% 訓練段、最佳參數於最後 25%（從未參與尋優）驗證，樣本外報酬為正才寫回 config、為負視為過擬合拒寫；hold-out <60 根直接報錯。輸出同時標示樣本內/樣本外兩組數字。實測範例：2330.TW 樣本內 15.58% → 樣本外 0.74%（Calmar 1.47→0.09），過擬合縮水直接可見。附 3 個防禦測試（含「網格搜尋不得看到訓練段以外資料」）。
 
 ### 1.6 [Low] ladder_system.py:55-61 ＋ backtester.py:237 — ATR 前 period-1 根為 0，早期波動濾網失效且止損貼進場價
 
