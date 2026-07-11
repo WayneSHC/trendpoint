@@ -15,6 +15,7 @@ TrendPoint - 專業交易工作站儀表板 (Trading Workstation Dashboard)
 """
 
 import os
+import hmac
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
@@ -66,7 +67,8 @@ def check_password() -> bool:
         return True
 
     def password_entered():
-        if st.session_state.get("password") == st.secrets["password"]:
+        # 常數時間比較，避免時序側信道（健檢 2.4）
+        if hmac.compare_digest(st.session_state.get("password", ""), st.secrets["password"]):
             st.session_state["password_correct"] = True
             reset_lockout(st.session_state)
             del st.session_state["password"]

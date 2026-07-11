@@ -23,6 +23,7 @@ from ladder_system import (
     detect_market_structure,
     calculate_ladder_levels,
     calculate_chandelier_exit,
+    ExitEvent,
     PositionManager
 )
 
@@ -143,9 +144,9 @@ def run_validation():
         else:
             # 持倉中，進行動態管理
             bar_count = i - entry_bar
-            pnl, event = pm.manage_position(close_val, atr_val, prev_ch_long, bar_count, time_limit=15)
-            if event != "持倉中" and event != "無持倉":
-                trade_logs.append(f"[{current_idx}] 持倉事件: {event} | 損益率: {pnl*100:+.2f}%")
+            event = pm.manage_position(close_val, atr_val, prev_ch_long, bar_count, time_limit=15)
+            if event not in (ExitEvent.HOLDING, ExitEvent.NOT_ACTIVE):
+                trade_logs.append(f"[{current_idx}] 持倉事件: {event.value}")
 
     print("\n交易日誌模擬紀錄：")
     for log in trade_logs:

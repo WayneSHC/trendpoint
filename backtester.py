@@ -23,7 +23,9 @@ from ladder_system import (
     calculate_ladder_levels,
     calculate_chandelier_exit,
     calculate_regime_filter,
-    PositionManager
+    PositionManager,
+    ExitEvent,
+    FULL_EXIT_EVENTS
 )
 from performance import compute_performance_metrics
 
@@ -269,7 +271,7 @@ class BacktestEngine:
                 position_value = position_shares * row['close']
 
                 # 執行部位管理
-                pnl_ratio, event = pm.manage_position(
+                event = pm.manage_position(
                     current_close=sig_row['close'],
                     current_atr=sig_row['atr'],
                     chandelier_long=prev_ch_long,
@@ -278,7 +280,7 @@ class BacktestEngine:
                 )
                 
                 # 處理減半平倉 (階段 1 止盈)
-                if event == "階段 1 止盈 50% 成功，止損移至保本位":
+                if event is ExitEvent.STAGE1_HALF:
                     execution_price = row['open'] * (1 - self.slippage_rate)
                     # 賣出股數同樣受整股單位約束；若僅持有一張無法分割，
                     # 則跳過實際賣出，但 PositionManager 已將止損移至保本位，
@@ -303,11 +305,11 @@ class BacktestEngine:
                             "commission": commission,
                             "tax": tax,
                             "cash": capital,
-                            "event": event
+                            "event": event.value
                         })
                 
                 # 處理全數平倉 (止損、時間止盈或剩餘部位吊燈止損)
-                elif event in ["觸發止損離場", "達到時間限制強制平倉", "剩餘部位觸發吊燈止損，波段結束"]:
+                elif event in FULL_EXIT_EVENTS:
                     execution_price = row['open'] * (1 - self.slippage_rate)
                     shares_sold = position_shares
                     revenue = shares_sold * execution_price
@@ -326,7 +328,7 @@ class BacktestEngine:
                         "commission": commission,
                         "tax": tax,
                         "cash": capital,
-                        "event": event
+                        "event": event.value
                     })
             
             # 更新淨值曲線
