@@ -47,6 +47,8 @@
 
 **修法**（二擇一，並更新憲法或程式使兩者一致）：(a) 將成交改為第 i+1 根 `open`（訊號判定維持第 i 根收盤資料）；或 (b) 在憲法與 README 明確標註採用「收盤判定、收盤成交＋滑價」等效機制，並統一 entry 各濾網時基（全部用已收盤的第 i 根，於第 i+1 根執行）。同時補一個「成交價必須來自訊號根之後」的 pytest。
 
+> **✅ 已修復（2026-07-11）**：採修法 (a)——兩引擎的進出場一律改為次根開盤價成交，訊號判定邏輯維持原策略定義（濾網用判定根、結構訊號與吊燈用其前一根）；portfolio 權重同步改取判定根（i-1）的 realized_vol。新增兩個防禦測試（成交價必須等於成交當根開盤 ×(1±滑價)），已驗證於舊實作下 FAIL。前後回測對照：所有標的**交易筆數完全不變**（訊號集合未動、僅成交時點位移），績效漲跌互見（如 00878 轉負、00631L 明顯轉好），無系統性方向偏移。
+
 ### 1.3 [Medium] monitor_signals.py:128-133 — 即時監控以 `df.iloc[-1]`（可能尚未收盤的 K 線）判定訊號
 
 盤中執行時，yfinance 回傳的最後一根 5 分鐘 K 線是**進行中**的 bar，其 close/high/low/volume 都會持續變動；以它判定 MSS/BOS/三關價突破會產生「repaint」訊號（推播後訊號消失），與第 137 行註解「訊號決策採用上一根已關閉 K 線」自相矛盾（實際取的是 `latest_idx = -1`）。
@@ -58,6 +60,8 @@
 `cleaned_df = cleaned_df.ffill().bfill()` 中的 `.bfill()` 會把序列開頭的缺值用未來資料回填。憲法第 VI 條規定「遇缺漏 K 線採向前填補並記錄警告」，並未允許向後填補；且此處填補時**沒有記錄任何警告**。
 
 **修法**：改為 `ffill()`＋開頭殘留 NaN 直接 `dropna()`，並在有填補發生時 `print`/`logging.warning` 筆數。
+
+> **✅ 已修復（2026-07-11）**：照修法實作——僅 ffill、開頭殘留 NaN dropna、有填補時印出警告筆數。
 
 ### 1.5 [Medium] optimizer.py:52-115、117-144 — 全樣本網格尋優後將參數寫回 config.yaml（樣本內過擬合固化）
 
@@ -117,11 +121,15 @@
 
 **修法**：`optimizer._load_data` 改呼叫 `db_security.safe_load_db_data(db_path, table_name)`。
 
+> **✅ 已修復（2026-07-11）**：照修法實作，並移除 optimizer.py 的直接 sqlite3 相依。
+
 ### 2.3 [Low] alerts.py:106、122 — Telegram Bot token 內嵌於 URL，例外訊息可能將 token 印入日誌
 
 `url = f"https://api.telegram.org/bot{self.tg_token}/sendMessage"`，連線失敗時 `print(f"Telegram 網路連線錯誤: {e}")`——requests 例外訊息通常包含完整 URL（含 token）。GitHub Actions 會遮罩已註冊 secrets，但本地執行的終端與任何轉存日誌不會。
 
 **修法**：捕捉例外時只印 `type(e).__name__` 或以 `str(e).replace(self.tg_token, '***')` 遮罩。
+
+> **✅ 已修復（2026-07-11）**：採 `str(e).replace(self.tg_token, '***')` 遮罩。
 
 ### 2.4 [Low] app.py:59-61 ＋ security_utils.py:57-77 — 密碼閘門未設定即整站放行；鎖定機制以 session_state 為界可被重開 session 重置
 
@@ -129,7 +137,7 @@
 
 **修法**：部署文件明確要求設定 password；鎖定計數改以來源 IP＋跨 session 儲存（如 SQLite）為鍵；比較改 `hmac.compare_digest`。
 
-> 另註：alert_scheduler.yml:6 `cron: '*/30 * * * *'` 全年無休每 30 分鐘執行（含收盤與週末），對公開 repo 是無意義的 Actions 配額消耗，建議限縮至台股交易時段（週一至五 01:00-06:00 UTC）。
+> 另註：alert_scheduler.yml:6 `cron: '*/30 * * * *'` 全年無休每 30 分鐘執行（含收盤與週末），對公開 repo 是無意義的 Actions 配額消耗，建議限縮至台股交易時段（週一至五 01:00-06:00 UTC）。**✅ 已於 2026-07-11 限縮為 `*/30 1-5 * * 1-5`。**
 
 ---
 
