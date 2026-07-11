@@ -8,9 +8,10 @@ TrendPoint - 策略參數自動尋優執行腳本 (Run Optimization)
 本腳本執行以下任務：
 1. 載入全域設定檔，取得系統設定的交易標的清單。
 2. 實例化 ParameterOptimizer 類別。
-3. 針對清單中每檔標的，執行歷史數據的網格搜尋。
+3. 針對清單中每檔標的，於「訓練段」（前 75% 歷史）執行網格搜尋。
 4. 尋找使卡爾瑪比率最高的 (ATR 週期, 階梯乘數 k) 最佳化組合。
-5. 將各標的的專屬參數寫回 config.yaml 進行持久化。
+5. 以最後 25% 的 hold-out 段驗證：樣本外報酬為正才寫回 config.yaml；
+   否則視為過擬合、不寫回（防止樣本內成績固化，憲法 I）。
 """
 
 import sys
@@ -30,18 +31,23 @@ def run():
         
         for ticker in tickers:
             try:
-                # 執行網格尋優
-                best_params, best_calmar = opt.optimize_ticker(ticker)
-                
-                # 將結果寫回設定檔
-                opt.save_override_to_yaml(ticker, best_params)
-                
+                # 訓練段網格尋優 + hold-out 段驗證
+                best_params, train_calmar, holdout_summary = opt.optimize_ticker(ticker)
+
+                # hold-out 驗證通過才寫回設定檔
+                if opt.holdout_passes(holdout_summary):
+                    opt.save_override_to_yaml(ticker, best_params)
+                else:
+                    print(f"⚠ {ticker} 的最佳參數於 hold-out 段報酬為負"
+                          f"（{holdout_summary.get('total_return', 0.0)*100:.2f}%），"
+                          f"視為過擬合，不寫回設定檔。")
+
             except Exception as e:
                 print(f"警告：優化標的 {ticker} 時發生錯誤。原因: {e}")
                 continue
-                
+
         print("\n" + "=" * 60)
-        print("參數最佳化尋優任務執行完畢！設定檔已完成更新。")
+        print("參數最佳化尋優任務執行完畢（僅 hold-out 驗證通過的標的寫回設定檔）。")
         print("=" * 60)
         
     except Exception as e:

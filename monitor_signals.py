@@ -87,6 +87,21 @@ def mark_alert_as_sent(ticker: str, bar_time: str, alert_type: str):
     finally:
         conn.close()
 
+def select_closed_bar_indices(bar_times: pd.DatetimeIndex,
+                              now: pd.Timestamp,
+                              bar_interval: pd.Timedelta) -> tuple:
+    """
+    回傳 (latest_idx, prev_idx)，latest 為「最新已收盤」K 線的位置索引。
+
+    盤中執行時，yfinance 回傳的最後一根 K 線是進行中的 bar——其
+    close/high/low/volume 都會持續變動，以它判定訊號會產生「推播後
+    訊號又消失」的 repaint。若 now 尚未到達末根時間 + K 線間隔，
+    表示末根尚未收盤，一律改用倒數第二根作為最新已收盤 K 線。
+    """
+    if now < bar_times[-1] + bar_interval:
+        return -2, -3
+    return -1, -2
+
 def check_new_signals(ticker: str, alert_mgr: AlertManager):
     """
     獲取最新數據，計算指標並發送滿足條件的警訊。
@@ -125,13 +140,15 @@ def check_new_signals(ticker: str, alert_mgr: AlertManager):
     df['upper_price'] = df['yesterday_low'] + df['diff'] * 1.382
     df['lower_price'] = df['yesterday_high'] - df['diff'] * 1.382
 
-    # 3. 取得最新剛收盤的 K 線與前一根 K 線進行突破判斷
-    if len(df) < 2:
+    # 3. 取得最新「已收盤」的 K 線與其前一根進行突破判斷。
+    # 盤中末根是進行中的 bar，不得用於訊號判定（repaint 防禦）
+    if len(df) < 3:
         return
-        
-    latest_idx = -1
-    prev_idx = -2
-    
+
+    bar_interval = pd.Timedelta(minutes=5)  # 對應上方 fetch 的 interval="5m"
+    now = pd.Timestamp.now(tz=df.index.tz)
+    latest_idx, prev_idx = select_closed_bar_indices(df.index, now, bar_interval)
+
     latest_time = df.index[latest_idx]
     latest_bar = df.iloc[latest_idx]
     prev_bar = df.iloc[prev_idx]
