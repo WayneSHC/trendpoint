@@ -30,7 +30,9 @@ from ladder_system import (
     calculate_ladder_levels,
     calculate_chandelier_exit,
     calculate_regime_filter,
-    PositionManager
+    PositionManager,
+    ExitEvent,
+    FULL_EXIT_EVENTS
 )
 from performance import compute_performance_metrics
 
@@ -261,7 +263,7 @@ class PortfolioBacktester:
                     time_limit = int(sig_row['param_time_limit'])
 
                     # 執行部位管理
-                    pnl_ratio, event = pm.manage_position(
+                    event = pm.manage_position(
                         current_close=sig_row['close'],
                         current_atr=sig_row['atr'],
                         chandelier_long=prev_ch_long,
@@ -270,7 +272,7 @@ class PortfolioBacktester:
                     )
                     
                     # 處理減半平倉 (階段 1 止盈)
-                    if event == "階段 1 止盈 50% 成功，止損移至保本位":
+                    if event is ExitEvent.STAGE1_HALF:
                         execution_price = row['open'] * (1 - self.slippage_rate)
                         # 整股單位約束：僅持有一張無法分割時，跳過實際賣出，
                         # 止損已移至保本位，等同零風險持倉。
@@ -294,11 +296,11 @@ class PortfolioBacktester:
                                 "commission": commission,
                                 "tax": tax,
                                 "cash": cash,
-                                "event": event
+                                "event": event.value
                             })
                         
                     # 處理全數平倉 (止損、時間止盈或吊燈止損)
-                    elif event in ["觸發止損離場", "達到時間限制強制平倉", "剩餘部位觸發吊燈止損，波段結束"]:
+                    elif event in FULL_EXIT_EVENTS:
                         execution_price = row['open'] * (1 - self.slippage_rate)
                         shares_sold = shares[t]
                         revenue = shares_sold * execution_price
@@ -318,7 +320,7 @@ class PortfolioBacktester:
                             "commission": commission,
                             "tax": tax,
                             "cash": cash,
-                            "event": event
+                            "event": event.value
                         })
             
             # --- 步驟 B：進場訊號偵測與資金配額買入 ---

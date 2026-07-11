@@ -17,6 +17,7 @@ TrendPoint - 多空階梯核心演算法模組 (Ladder System Core)
 
 import numpy as np
 import pandas as pd
+from enum import Enum
 from typing import Tuple, Union
 
 # Numba JIT 自動降級回退機制 (容錯防呆)
@@ -53,20 +54,27 @@ def calculate_atr(tr: pd.Series, period: int = 14) -> pd.Series:
     """
     計算平均真實波幅 (Average True Range, ATR)，採用懷爾德平滑法 (Wilder's Smoothing)
     公式: ATR_t = ((period - 1) * ATR_prev + TR_t) / period
+
+    暖機期（前 period-1 根）ATR 尚未成熟，回傳 NaN——不得回傳 0，
+    否則波動濾網 `amplitude > 1.2 * ATR` 恆為 True（形同停用）、
+    初始止損 `entry - 2 * ATR` 貼在進場價（任何回檔立即止損）。
     """
     # 轉換為 NumPy 陣列以利底層加速
-    tr_arr = tr.values
+    tr_arr = tr.values.astype(np.float64)
     atr_arr = np.zeros_like(tr_arr)
-    
+
     if len(tr_arr) < period:
-        return pd.Series(atr_arr, index=tr.index)
-    
+        return pd.Series(np.full(len(tr_arr), np.nan), index=tr.index)
+
     # 初始 ATR 值以簡單移動平均 (SMA) 代替
     atr_arr[period - 1] = np.mean(tr_arr[:period])
-    
+
     # 遞迴計算平滑 ATR
     _calculate_atr_jit(tr_arr, atr_arr, period)
-    
+
+    # 暖機期標記為未成熟
+    atr_arr[:period - 1] = np.nan
+
     return pd.Series(atr_arr, index=tr.index)
 
 @jit(nopython=True, cache=True)
@@ -206,12 +214,14 @@ def calculate_chandelier_exit(df: pd.DataFrame, atr: pd.Series, period: int = 22
     """
     rolling_max = df['high'].rolling(window=period).max()
     rolling_min = df['low'].rolling(window=period).min()
-    
+
     chandelier_long = rolling_max - (atr * multiplier)
     chandelier_short = rolling_min + (atr * multiplier)
-    
-    # 進行移位以防看前偏誤，確保當前 K 線決策所採用的止損價為上一根 K 線之計算結果
-    return chandelier_long.shift(1), chandelier_short.shift(1)
+
+    # 不在此處移位——時基統一由呼叫端管理（引擎取「判定根的前一根」）。
+    # 舊版在此 shift(1) 加上引擎又取前一根，造成雙重移位（實際用到 i-2 的
+    # 吊燈線），止損跟蹤比設計慢一根（健檢 1.8）
+    return chandelier_long, chandelier_short
 
 # =========================================================================
 # 3.5. 擴充技術指標模組 (EMA & KAMA)
@@ -344,6 +354,23 @@ def calculate_bollinger_bands(series: pd.Series, period: int = 20, num_std: floa
 # 4. 進場確認與部位管理器 (Entry & Position Manager)
 # =========================================================================
 
+class ExitEvent(Enum):
+    """
+    部位管理事件。引擎與所有呼叫端一律以 enum 身分比對來驅動資金流；
+    .value 的中文字串僅供顯示與交易日誌（修改文案不影響任何邏輯分支）。
+    舊版以中文字串精確比對橫跨三個檔案，任何文案修改都會讓平倉分支
+    靜默失效（健檢 1.10）。
+    """
+    NOT_ACTIVE = "無持倉"
+    HOLDING = "持倉中"
+    STOP_LOSS = "觸發止損離場"
+    TIME_LIMIT = "達到時間限制強制平倉"
+    STAGE1_HALF = "階段 1 止盈 50% 成功，止損移至保本位"
+    CHANDELIER = "剩餘部位觸發吊燈止損，波段結束"
+
+# 會使引擎執行「全數平倉」的事件集合
+FULL_EXIT_EVENTS = frozenset({ExitEvent.STOP_LOSS, ExitEvent.TIME_LIMIT, ExitEvent.CHANDELIER})
+
 class PositionManager:
     """
     交易部位管理與複式分批止盈核心邏輯
@@ -389,43 +416,53 @@ class PositionManager:
             trend_ok = (close > daily_open) and (close > vwap)
         trend_ok = trend_ok or ('trend' in disabled_filters)
 
-        # 4. 波動端: 振幅位移大於 1.2 倍 ATR
+        # 4. 波動端: 振幅位移大於 1.2 倍 ATR。
+        # ATR 未成熟（NaN 或 <=0，見 calculate_atr 暖機期）一律不進場——
+        # 不得依賴「與 NaN 比較恰好為 False」的隱性行為
         amplitude = candle_high - candle_low
-        volatility_ok = (amplitude > 1.2 * atr) or ('volatility' in disabled_filters)
+        atr_ready = (atr is not None) and pd.notna(atr) and atr > 0.0
+        volatility_ok = (atr_ready and amplitude > 1.2 * atr) or ('volatility' in disabled_filters)
 
         # 綜合全域濾網 (例如三關價判定與市況濾網)
         global_ok = global_filter_ok or ('global' in disabled_filters)
 
         return structure_ok and momentum_ok and trend_ok and volatility_ok and global_ok
 
-    def manage_position(self, 
-                        current_close: float, 
-                        current_atr: float, 
-                        chandelier_long: float, 
-                        bar_count: int, 
-                        time_limit: int = 10) -> Tuple[float, str]:
+    def manage_position(self,
+                        current_close: float,
+                        current_atr: float,
+                        chandelier_long: float,
+                        bar_count: int,
+                        time_limit: int = 10) -> ExitEvent:
         """
-        部位動態跟蹤管理，回傳 (實現損益比率, 事件說明)
+        部位動態跟蹤管理，回傳 ExitEvent（呼叫端以 enum 身分比對）。
+
+        設計假設（健檢 1.9 註記）：
+        - 止損與吊燈皆以「收盤價跌破」判定——盤中一度跌破但收盤收回
+          不觸發，屬樂觀假設；實際成交價由回測引擎決定（次根開盤±滑價）。
+        - 本方法不回報損益數字：舊版回傳的 pnl_ratio 以止損價計算、
+          與引擎實際成交價不一致，且從未被任何引擎使用，已移除。
         """
         if not self.is_active:
-            return 0.0, "無持倉"
-        
+            return ExitEvent.NOT_ACTIVE
+
         # 買入多頭部位管理邏輯
         if self.direction == 1:
             # 保呆機制：檢查是否觸發初始止損或移動止損
             if current_close <= self.stop_loss:
-                realized_pnl = (self.stop_loss - self.entry_price) / self.entry_price
                 self.is_active = False
                 self.stage = 0
-                return realized_pnl, "觸發止損離場"
-                
-            # 時間止盈 (Time-Based Exit)
+                return ExitEvent.STOP_LOSS
+
+            # 時間止盈 (Time-Based Exit)——刻意僅約束階段 1（遲未達首個獲利
+            # 目標的呆滯部位）；完成減半後 (stage 2) 部位已保本，轉由吊燈止損
+            # 跟蹤讓利潤奔跑，不再受時間上限約束（健檢 1.7 確認為預期行為，
+            # 行為規格見 tests/test_position_manager.py）
             if bar_count >= time_limit and self.stage == 1:
-                realized_pnl = (current_close - self.entry_price) / self.entry_price
                 self.is_active = False
                 self.stage = 0
-                return realized_pnl, "達到時間限制強制平倉"
-            
+                return ExitEvent.TIME_LIMIT
+
             # 階段 1: 當獲利達到 1.5 * ATR，平倉 50% 並將止損移至進場保本位
             if self.stage == 1:
                 target_p1 = self.entry_price + 1.5 * current_atr
@@ -433,20 +470,18 @@ class PositionManager:
                     self.stage = 2
                     self.stop_loss = self.entry_price # 移至保本位 (Breakeven)
                     self.position_size *= 0.5
-                    p1_pnl = (target_p1 - self.entry_price) / self.entry_price * 0.5
-                    return p1_pnl, "階段 1 止盈 50% 成功，止損移至保本位"
-                    
+                    return ExitEvent.STAGE1_HALF
+
             # 階段 2: 已完成減半，剩餘部位以吊燈式止損進行移動跟蹤
             elif self.stage == 2:
                 # 吊燈止損隨價格上移而動態調升，不可調降
                 if chandelier_long > self.stop_loss:
                     self.stop_loss = chandelier_long
-                
+
                 # 檢查價格是否跌破動態吊燈止損線
                 if current_close < self.stop_loss:
-                    realized_pnl = (self.stop_loss - self.entry_price) / self.entry_price * 0.5
                     self.is_active = False
                     self.stage = 0
-                    return realized_pnl, "剩餘部位觸發吊燈止損，波段結束"
-                    
-        return 0.0, "持倉中"
+                    return ExitEvent.CHANDELIER
+
+        return ExitEvent.HOLDING
