@@ -208,3 +208,66 @@ def test_portfolio_no_trades_before_listing():
     # 交叉驗證：早上市標的在同一期間應正常交易（確保防護沒有誤殺）
     early_trades = trades[trades["ticker"] == "EARLY.TW"]
     assert not early_trades.empty, "掛牌前防護誤殺了正常標的的進場"
+
+# ---------------------------------------------------------------------------
+# 憲法 I 成交規則：訊號於第 N 根（收盤後）判定、第 N+1 根開盤價成交
+# 背景：引擎曾以「訊號當根的收盤價」成交——收盤價確定的那一刻已無法以該價
+# 成交，屬樂觀偏誤。以下測試鎖定「成交價必須來自成交當根的開盤價」。
+# ---------------------------------------------------------------------------
+
+def test_fills_use_next_bar_open():
+    """
+    單標的引擎：每一筆交易的成交價必須等於「成交當根開盤價 × (1 ± 滑價)」，
+    而非任何一根的收盤價。（在舊的「當根收盤成交」實作下，本測試會失敗。）
+    """
+    df = _generate_mock_data(100)
+
+    engine = BacktestEngine(
+        initial_capital=1000000.0,
+        commission_rate=0.001425,
+        tax_rate=0.003,
+        slippage_rate=0.0005,
+        lot_size=1
+    )
+    res = engine.run_backtest(
+        df,
+        atr_period=14, k=2.0, ch_period=22, ch_multiplier=3.0,
+        time_limit=15, use_adx_filter=False, use_ma_filter=False
+    )
+    trades = res["trades"]
+    assert len(trades) > 0, "mock 數據未產生任何交易，測試失去驗證意義"
+
+    slip = engine.slippage_rate
+    for _, tr in trades.iterrows():
+        bar_open = df.loc[tr["datetime"], "open"]
+        if tr["action"] == "BUY":
+            expected = bar_open * (1 + slip)
+        else:  # SELL_HALF / SELL_ALL
+            expected = bar_open * (1 - slip)
+        assert abs(tr["price"] - expected) < 1e-9, (
+            f"{tr['datetime']} {tr['action']} 成交價 {tr['price']:.4f} "
+            f"不等於當根開盤 {bar_open:.4f} × (1±滑價) —— 違反憲法 I 成交規則"
+        )
+
+
+def test_portfolio_fills_use_next_bar_open():
+    """
+    投資組合引擎：合成資料 open=100、close=110 恆定，
+    買入成交價必須是 100 ×(1+滑價)（次根開盤），而非 110（訊號根收盤）。
+    """
+    from portfolio_backtester import PortfolioBacktester
+
+    frames = {"AAA.TW": _make_portfolio_frame(pd.bdate_range("2025-01-01", periods=30))}
+
+    pb = PortfolioBacktester()
+    pb.tickers = list(frames.keys())
+    pb._load_and_calculate_indicators = lambda: frames
+
+    trades = pb.run_portfolio_backtest()["trades"]
+    buys = trades[trades["action"] == "BUY"]
+    assert not buys.empty, "合成資料設計為必定進場，卻無任何買入——測試前提失效"
+
+    expected = 100.0 * (1 + pb.slippage_rate)
+    assert (abs(buys["price"] - expected) < 1e-9).all(), (
+        "買入成交價不是次根開盤價——若接近 110（訊號根收盤）即為當根收盤成交偏誤"
+    )
