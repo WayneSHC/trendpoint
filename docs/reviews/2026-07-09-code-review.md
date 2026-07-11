@@ -79,11 +79,15 @@
 
 **修法**：ATR 未成熟（前 period 根）回傳 NaN 並在進場條件中要求 `atr > 0`／`notna`。
 
+> **✅ 已修復（2026-07-11）**：照修法實作；波動濾網顯式要求 ATR notna 且 >0。日線資料上暖機期落在序列開頭，實測所有標的交易與績效不變。
+
 ### 1.7 [Low] ladder_system.py:419 — 時間止盈僅在 `stage == 1` 生效，減半後持倉無時間上限
 
 `if bar_count >= time_limit and self.stage == 1`：一旦完成階段 1 減半（stage=2），剩餘部位只剩吊燈止損，`time_limit`「防禦時間維度風險」的設計對後半段部位不再成立。若為刻意設計（讓獲利部位奔跑），未見任何註解或規格佐證（**未確認**是否為預期行為）。
 
 **修法**：在 spec（specs/006-exit-system-completion）明確此行為並補測試，或改為 stage 2 亦受時間上限約束。
+
+> **✅ 已修復（2026-07-11）**：確認為預期行為（stage 2 已保本、讓利潤奔跑）——已於 manage_position 補註解、並以 tests/test_position_manager.py 將行為固定為規格；未改變策略行為。
 
 ### 1.8 [Low] ladder_system.py:210 ＋ backtester.py:256-257 — 吊燈止損被雙重移位（shift 兩根）
 
@@ -91,17 +95,23 @@
 
 **修法**：擇一移位——建議函式內不 shift，由呼叫端統一取 `prev_row`。
 
+> **✅ 已修復（2026-07-11）**：照建議實作——函式不再 shift，時基由引擎統一管理（取判定根前一根）。前後對照：僅 2330.TW 一筆出場因跟蹤快一根而改善（13.15%→15.83%，交易筆數不變），其餘標的完全不變。
+
 ### 1.9 [Low] ladder_system.py:413、443 — `manage_position` 回傳的 pnl_ratio 以止損價計算，與引擎實際成交價（收盤價）不一致
 
 `realized_pnl = (self.stop_loss - self.entry_price) / self.entry_price`，但 backtester.py:302 實際以 `row['close'] * (1 - slippage)` 成交。所幸兩個引擎皆未使用該回傳值（僅用事件字串），屬死值＋語意陷阱；另注意止損是以「收盤價跌破」判定，盤中跌破不觸發，兩引擎行為一致但屬樂觀假設。
 
 **修法**：移除 pnl_ratio 回傳或改回傳事件 enum；在文件標註「止損以收盤判定」的假設。
 
+> **✅ 已修復（2026-07-11）**：pnl_ratio 已移除、改回傳 ExitEvent enum（與 1.10 同一次改動）；「止損以收盤判定」的樂觀假設已標註於 manage_position docstring 並有測試佐證。
+
 ### 1.10 [Low] backtester.py:272、301 — 以中文事件字串精確比對驅動資金流
 
 `if event == "階段 1 止盈 50% 成功，止損移至保本位"` 等硬字串比對橫跨 ladder_system.py 與兩個回測引擎，任何文案修改都會讓平倉分支靜默失效（部位管理器已平倉、引擎卻不賣股票，現金與淨值直接錯亂）。
 
 **修法**：改用 Enum（如 `ExitEvent.STAGE1_HALF`、`ExitEvent.STOP_LOSS`）回傳，字串僅供顯示。
+
+> **✅ 已修復（2026-07-11）**：新增 ExitEvent enum 與 FULL_EXIT_EVENTS 集合，兩引擎與 validate_ladder 一律以 enum 身分比對；中文字串降級為 .value（僅交易日誌顯示）。回歸驗證：組合回測數字逐項不變。
 
 > 另註（非缺陷）：backtester.py:133 計算的 `temp_df['ladder']` 在回測迴圈中從未參與進出場判斷，僅 UI 展示用；作為「多空階梯系統」的回測引擎，階梯本身不在訊號路徑上，建議在文件中說明以免誤導使用者。
 
@@ -140,6 +150,8 @@
 `if "password" not in st.secrets: return True` 表示部署時忘記設定 secrets 就是無密碼公開站（僅有註解提醒）；登入鎖定計數存在 `st.session_state`，攻擊者重整頁面／開新 session 即歸零，防暴力破解效果有限；另 `==` 比較非常數時間（Streamlit 場景下風險極低）。
 
 **修法**：部署文件明確要求設定 password；鎖定計數改以來源 IP＋跨 session 儲存（如 SQLite）為鍵；比較改 `hmac.compare_digest`。
+
+> **✅ 部分修復（2026-07-11）**：密碼比較已改 `hmac.compare_digest`（常數時間）。「未設 secrets 即整站放行」為刻意的本地開發便利（原碼已註解）、跨 session 鎖定屬部署面強化，兩者維持現狀——公開部署時務必設定 st.secrets password。
 
 > 另註：alert_scheduler.yml:6 `cron: '*/30 * * * *'` 全年無休每 30 分鐘執行（含收盤與週末），對公開 repo 是無意義的 Actions 配額消耗，建議限縮至台股交易時段（週一至五 01:00-06:00 UTC）。**✅ 已於 2026-07-11 限縮為 `*/30 1-5 * * 1-5`。**
 
