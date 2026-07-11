@@ -123,7 +123,8 @@ class AlertManager:
                 print(f"Telegram 發送失敗。狀態碼: {response.status_code}，原因: {response.text}")
                 return False
         except Exception as e:
-            print(f"Telegram 網路連線錯誤: {e}")
+            # requests 例外訊息通常含完整 URL（內嵌 bot token），印出前先遮罩
+            print(f"Telegram 網路連線錯誤: {str(e).replace(self.tg_token, '***')}")
             return False
 
     def send_alert(self, message: str, raw_text: Optional[str] = None) -> bool:

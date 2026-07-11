@@ -14,13 +14,13 @@ TrendPoint - 策略參數尋優模組 (Parameter Optimizer)
 
 import os
 import yaml
-import sqlite3
 import numpy as np
 import pandas as pd
 from typing import Tuple, Dict, Any
 
 from config import load_config
 from backtester import BacktestEngine
+from db_security import safe_load_db_data
 
 class ParameterOptimizer:
     """
@@ -43,15 +43,9 @@ class ParameterOptimizer:
         
         if not os.path.exists(db_path):
             raise FileNotFoundError(f"資料庫檔案不存在: {db_path}")
-            
-        conn = sqlite3.connect(db_path)
-        try:
-            df = pd.read_sql_query(f"SELECT * FROM {table_name}", conn)
-            df['datetime'] = pd.to_datetime(df['datetime'])
-            df = df.set_index('datetime')
-            return df
-        finally:
-            conn.close()
+
+        # 憲法安全條款：SQLite 存取一律走 db_security 白名單，禁止逕行拼接 SQL
+        return safe_load_db_data(db_path, table_name)
 
     def optimize_ticker(self, ticker: str) -> Tuple[Dict[str, Any], float]:
         """

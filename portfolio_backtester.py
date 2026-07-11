@@ -239,8 +239,10 @@ class PortfolioBacktester:
                     current_stock_value += shares[t] * aligned_dfs[t]['close'].iloc[i]
             total_equity = cash + current_stock_value
 
-            # 各標的資金配額上限：等權重或波動率倒數加權（風險均衡）
-            weights = self._compute_weights(aligned_dfs, i)
+            # 各標的資金配額上限：等權重或波動率倒數加權（風險均衡）。
+            # 權重取自第 i-1 根（已收盤）的波動率——權重用於第 i 根開盤的成交，
+            # 不得使用第 i 根自身的資料（憲法 I 看前偏誤防禦）
+            weights = self._compute_weights(aligned_dfs, i - 1)
             max_capital_by_ticker = {t: total_equity * weights[t] for t in self.tickers}
             
             # --- 步驟 A：持倉部位管理與平倉處理 ---
@@ -249,16 +251,19 @@ class PortfolioBacktester:
                 if pm.is_active and shares[t] > 0.0:
                     df_t = aligned_dfs[t]
                     row = df_t.iloc[i]
-                    prev_row = df_t.iloc[i - 1]
-                    
+                    # 憲法 I 成交規則：出場決策以第 i-1 根（已收盤）判定，
+                    # 於第 i 根開盤價成交；吊燈止損維持原策略定義：
+                    # 取判定根的前一根（持倉時 i>=3 必然存在）
+                    sig_row = df_t.iloc[i - 1]
+
                     bar_count = i - entry_bars[t]
-                    prev_ch_long = prev_row['chandelier_long']
-                    time_limit = int(row['param_time_limit'])
-                    
+                    prev_ch_long = df_t.iloc[i - 2]['chandelier_long']
+                    time_limit = int(sig_row['param_time_limit'])
+
                     # 執行部位管理
                     pnl_ratio, event = pm.manage_position(
-                        current_close=row['close'],
-                        current_atr=row['atr'],
+                        current_close=sig_row['close'],
+                        current_atr=sig_row['atr'],
                         chandelier_long=prev_ch_long,
                         bar_count=bar_count,
                         time_limit=time_limit
@@ -266,7 +271,7 @@ class PortfolioBacktester:
                     
                     # 處理減半平倉 (階段 1 止盈)
                     if event == "階段 1 止盈 50% 成功，止損移至保本位":
-                        execution_price = row['close'] * (1 - self.slippage_rate)
+                        execution_price = row['open'] * (1 - self.slippage_rate)
                         # 整股單位約束：僅持有一張無法分割時，跳過實際賣出，
                         # 止損已移至保本位，等同零風險持倉。
                         shares_to_sell = self.round_to_lot(shares[t] * 0.5)
@@ -294,7 +299,7 @@ class PortfolioBacktester:
                         
                     # 處理全數平倉 (止損、時間止盈或吊燈止損)
                     elif event in ["觸發止損離場", "達到時間限制強制平倉", "剩餘部位觸發吊燈止損，波段結束"]:
-                        execution_price = row['close'] * (1 - self.slippage_rate)
+                        execution_price = row['open'] * (1 - self.slippage_rate)
                         shares_sold = shares[t]
                         revenue = shares_sold * execution_price
 
@@ -324,31 +329,40 @@ class PortfolioBacktester:
                 if not pm.is_active and shares[t] == 0.0:
                     df_t = aligned_dfs[t]
                     row = df_t.iloc[i]
-                    prev_row = df_t.iloc[i - 1]
+                    # 憲法 I 成交規則：訊號於第 i-1 根（已收盤）判定，
+                    # 於第 i 根開盤價成交。判定邏輯維持原策略定義：
+                    # 濾網用判定根 sig_row、結構訊號用判定根的前一根 struct_row
+                    sig_row = df_t.iloc[i - 1]
+                    struct_row = df_t.iloc[i - 2] if i >= 2 else None
+                    # 掛牌後首根作判定根時，struct_row 落在上市前（NaN）——
+                    # 顯式視為「尚無結構訊號」，不依賴 NaN 比較恰好為 False
+                    if struct_row is not None and pd.isna(struct_row['close']):
+                        struct_row = None
 
-                    # 上市前防護：該標的尚無真實 K 線（對齊後為 NaN），一律跳過，
-                    # 不得依賴 NaN 比較恰好為 False 的隱性行為
-                    if pd.isna(row['close']) or pd.isna(prev_row['close']):
+                    # 上市前防護：訊號根或成交根尚無真實 K 線（對齊後為 NaN）
+                    # 一律跳過，不得依賴 NaN 比較恰好為 False 的隱性行為
+                    if pd.isna(sig_row['close']) or pd.isna(row['open']):
                         continue
 
                     # 全域濾網：三關價 + 市況濾網 (ADX/長均線/ER)
-                    global_ok = (row['close'] > row['mid_price']) and bool(row['regime_ok'])
-                    
+                    global_ok = (sig_row['close'] > sig_row['mid_price']) and bool(sig_row['regime_ok'])
+
                     # 結構突破確認
                     struct_sig = 0
-                    if prev_row['mss_signal'] == 1 or prev_row['bos_signal'] == 1:
-                        struct_sig = 1
-                    elif prev_row['mss_signal'] == -1 or prev_row['bos_signal'] == -1:
-                        struct_sig = -1
-                        
+                    if struct_row is not None:
+                        if struct_row['mss_signal'] == 1 or struct_row['bos_signal'] == 1:
+                            struct_sig = 1
+                        elif struct_row['mss_signal'] == -1 or struct_row['bos_signal'] == -1:
+                            struct_sig = -1
+
                     is_entry = pm.check_entry_signal(
-                        close=row['close'],
-                        open_val=row['open'],
-                        daily_open=row['daily_open'],
-                        vwap=row['vwap'],
-                        atr=row['atr'],
-                        candle_high=row['high'],
-                        candle_low=row['low'],
+                        close=sig_row['close'],
+                        open_val=sig_row['open'],
+                        daily_open=sig_row['daily_open'],
+                        vwap=sig_row['vwap'],
+                        atr=sig_row['atr'],
+                        candle_high=sig_row['high'],
+                        candle_low=sig_row['low'],
                         structure_sig=struct_sig,
                         global_filter_ok=global_ok,
                         is_daily=True # 組合回測目前為日線級別
@@ -372,7 +386,8 @@ class PortfolioBacktester:
                         df_t = aligned_dfs[t]
                         row = df_t.iloc[i]
 
-                        raw_price = row['close']
+                        # 以次根（第 i 根）開盤價成交
+                        raw_price = row['open']
                         execution_price = raw_price * (1 + self.slippage_rate)
 
                         # 整股單位買入：股數向下取整至 lot_size 倍數
@@ -393,7 +408,7 @@ class PortfolioBacktester:
                         pm.is_active = True
                         pm.entry_price = execution_price
                         pm.position_size = 1.0
-                        pm.stop_loss = execution_price - 2.0 * row['atr']
+                        pm.stop_loss = execution_price - 2.0 * df_t.iloc[i - 1]['atr']
                         pm.stage = 1
                         pm.direction = 1
                         entry_bars[t] = i

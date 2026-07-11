@@ -180,30 +180,34 @@ class BacktestEngine:
         for i in range(1, len(temp_df)):
             current_time = temp_df.index[i]
             row = temp_df.iloc[i]
-            
-            # 防禦看前偏誤：進場決策採用前一根 K 線之訊號
-            prev_row = temp_df.iloc[i - 1]
-            
+
+            # 憲法 I 成交規則：訊號於第 i-1 根（已完整收盤）判定，
+            # 於第 i 根開盤價成交。判定邏輯本身維持原策略定義：
+            # 濾網用判定根 sig_row、結構訊號用判定根的前一根 struct_row
+            sig_row = temp_df.iloc[i - 1]
+            struct_row = temp_df.iloc[i - 2] if i >= 2 else None
+
             # 若目前無持倉，檢查進場訊號
             if not pm.is_active and position_shares == 0.0:
                 # 全域濾網：三關價（價格在中關價之上做多）+ 市況濾網 (ADX/長均線/ER)
-                global_ok = (row['close'] > row['mid_price']) and bool(row['regime_ok'])
-                
+                global_ok = (sig_row['close'] > sig_row['mid_price']) and bool(sig_row['regime_ok'])
+
                 # 結構訊號合併 (BOS 或 MSS 均可做為結構確認)
                 struct_sig = 0
-                if prev_row['mss_signal'] == 1 or prev_row['bos_signal'] == 1:
-                    struct_sig = 1
-                elif prev_row['mss_signal'] == -1 or prev_row['bos_signal'] == -1:
-                    struct_sig = -1
-                
+                if struct_row is not None:
+                    if struct_row['mss_signal'] == 1 or struct_row['bos_signal'] == 1:
+                        struct_sig = 1
+                    elif struct_row['mss_signal'] == -1 or struct_row['bos_signal'] == -1:
+                        struct_sig = -1
+
                 is_entry = pm.check_entry_signal(
-                    close=row['close'],
-                    open_val=row['open'],
-                    daily_open=row['daily_open'],
-                    vwap=row['vwap'],
-                    atr=row['atr'],
-                    candle_high=row['high'],
-                    candle_low=row['low'],
+                    close=sig_row['close'],
+                    open_val=sig_row['open'],
+                    daily_open=sig_row['daily_open'],
+                    vwap=sig_row['vwap'],
+                    atr=sig_row['atr'],
+                    candle_high=sig_row['high'],
+                    candle_low=sig_row['low'],
                     structure_sig=struct_sig,
                     global_filter_ok=global_ok,
                     is_daily=is_daily,
@@ -211,8 +215,8 @@ class BacktestEngine:
                 )
 
                 if is_entry:
-                    # 計算買入價格 (含滑點成本)
-                    raw_price = row['close']
+                    # 以次根開盤價成交 (含滑點成本)
+                    raw_price = row['open']
                     execution_price = raw_price * (1 + self.slippage_rate)
 
                     # 整股單位買入：股數向下取整至 lot_size 倍數（台股一張 1000 股）
@@ -238,7 +242,7 @@ class BacktestEngine:
                     pm.is_active = True
                     pm.entry_price = execution_price
                     pm.position_size = 1.0 # 初始持倉比例為 100%
-                    pm.stop_loss = execution_price - 2.0 * row['atr']
+                    pm.stop_loss = execution_price - 2.0 * sig_row['atr']
                     pm.stage = 1
                     pm.direction = 1
                     entry_bar_idx = i
@@ -257,16 +261,17 @@ class BacktestEngine:
             # 若目前有持倉，動態更新與管理部位
             elif pm.is_active and position_shares > 0.0:
                 bar_count = i - entry_bar_idx
-                # 使用前一根 K 線的吊燈止損，防看前偏誤
-                prev_ch_long = prev_row['chandelier_long']
-                
+                # 出場決策同樣以判定根（第 i-1 根收盤）判定、次根開盤成交；
+                # 吊燈止損維持原策略定義：取判定根的前一根（持倉時 i>=3 必然存在）
+                prev_ch_long = struct_row['chandelier_long']
+
                 # 計算當下部位價值
                 position_value = position_shares * row['close']
-                
+
                 # 執行部位管理
                 pnl_ratio, event = pm.manage_position(
-                    current_close=row['close'],
-                    current_atr=row['atr'],
+                    current_close=sig_row['close'],
+                    current_atr=sig_row['atr'],
                     chandelier_long=prev_ch_long,
                     bar_count=bar_count,
                     time_limit=time_limit
@@ -274,7 +279,7 @@ class BacktestEngine:
                 
                 # 處理減半平倉 (階段 1 止盈)
                 if event == "階段 1 止盈 50% 成功，止損移至保本位":
-                    execution_price = row['close'] * (1 - self.slippage_rate)
+                    execution_price = row['open'] * (1 - self.slippage_rate)
                     # 賣出股數同樣受整股單位約束；若僅持有一張無法分割，
                     # 則跳過實際賣出，但 PositionManager 已將止損移至保本位，
                     # 經濟意義等同「部位太小不拆分、直接轉為零風險持倉」。
@@ -303,7 +308,7 @@ class BacktestEngine:
                 
                 # 處理全數平倉 (止損、時間止盈或剩餘部位吊燈止損)
                 elif event in ["觸發止損離場", "達到時間限制強制平倉", "剩餘部位觸發吊燈止損，波段結束"]:
-                    execution_price = row['close'] * (1 - self.slippage_rate)
+                    execution_price = row['open'] * (1 - self.slippage_rate)
                     shares_sold = position_shares
                     revenue = shares_sold * execution_price
 

@@ -84,9 +84,16 @@ def clean_kline_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     # 重新命名索引為 datetime
     cleaned_df.index.name = "datetime"
     
-    # 缺失值防呆：若有缺失的價格或成交量，使用前值填補，再用後值填補
-    cleaned_df = cleaned_df.ffill().bfill()
-    
+    # 缺失值防呆：僅允許前值填補（憲法 VI）；序列開頭的殘留缺值直接剔除，
+    # 嚴禁 bfill——向後填補會把未來資料回填至過去（看前偏誤）
+    n_missing = int(cleaned_df.isna().any(axis=1).sum())
+    if n_missing > 0:
+        cleaned_df = cleaned_df.ffill()
+        n_head_drop = int(cleaned_df.isna().any(axis=1).sum())
+        cleaned_df = cleaned_df.dropna()
+        print(f"警告：資料清洗以 ffill 填補了 {n_missing - n_head_drop} 列缺值，"
+              f"並剔除序列開頭無法前向填補的 {n_head_drop} 列。")
+
     return cleaned_df
 
 def validate_data_contract(df: pd.DataFrame) -> bool:
