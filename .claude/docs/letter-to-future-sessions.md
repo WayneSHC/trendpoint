@@ -78,3 +78,10 @@ git 出現詭異損毀時第一個懷疑 Drive 同步衝突（找 `*conflicted c
   仍待使用者決定：(1) 是否搬離 Google Drive；(2) 是否裁剪 plugin 清單
   （見 harness-diagnosis.md）；(3) 剩餘 finding（High 3.3 文件著作權確認、
   Medium 以下）的修復排程。
+- 2026-07-11 更新：**健檢 21 項發現全數結案**（PR #5 著作權清理、
+  PR #6 次根開盤成交、PR #7 監控 repaint + 尋優 hold-out 閘門、
+  PR #8 Low 級批次含 ExitEvent enum），細節與驗證證據見健檢報告內
+  各「✅ 已修復」註記。引擎現為可信基準；下一階段是 specs/002–006
+  的新功能開發（走 Spec Kit 流程；003 內含「做空 vs Long-Only」
+  待使用者決策）。仍待使用者決定：搬離 Google Drive、裁剪 plugin、
+  TrendPoint_OpenSpec.md 是否移入 docs/。
