@@ -334,6 +334,10 @@ class PortfolioBacktester:
                     # 濾網用判定根 sig_row、結構訊號用判定根的前一根 struct_row
                     sig_row = df_t.iloc[i - 1]
                     struct_row = df_t.iloc[i - 2] if i >= 2 else None
+                    # 掛牌後首根作判定根時，struct_row 落在上市前（NaN）——
+                    # 顯式視為「尚無結構訊號」，不依賴 NaN 比較恰好為 False
+                    if struct_row is not None and pd.isna(struct_row['close']):
+                        struct_row = None
 
                     # 上市前防護：訊號根或成交根尚無真實 K 線（對齊後為 NaN）
                     # 一律跳過，不得依賴 NaN 比較恰好為 False 的隱性行為
