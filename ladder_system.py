@@ -140,15 +140,91 @@ def _detect_fvg(df: pd.DataFrame, direction: str) -> pd.Series:
     return result.astype(bool)
 
 
+def detect_swing_points(df: pd.DataFrame, n: int = 2) -> pd.DataFrame:
+    """
+    對稱碎形 swing 高/低點偵測（spec 007）。
+
+    bar i 為 swing high 若 high[i] == max(high[i-n : i+n+1])（swing low 對稱）。
+    回傳於「樞紐當根 i」對齊的四欄：is_swing_high / is_swing_low /
+    swing_high_val / swing_low_val（非樞紐處值為 NaN）。
+
+    單一職責：本函式只做偵測；確認延遲（樞紐 i 要到 i+n 才可用）由呼叫端以
+    shift(n) 處理（見 classify_structure）。前 n 與後 n 根因窗口不足恆為 False
+    （rolling center 邊界為 NaN）。純向量化。
+    """
+    if n < 1:
+        raise ValueError(f"swing 碎形強度 n 必須 >= 1，收到 {n}")
+    window = 2 * n + 1
+    roll_high = df['high'].rolling(window=window, center=True).max()
+    roll_low = df['low'].rolling(window=window, center=True).min()
+    is_high = (df['high'] == roll_high) & roll_high.notna()
+    is_low = (df['low'] == roll_low) & roll_low.notna()
+    return pd.DataFrame(
+        {
+            'is_swing_high': is_high.astype(bool),
+            'is_swing_low': is_low.astype(bool),
+            'swing_high_val': df['high'].where(is_high),
+            'swing_low_val': df['low'].where(is_low),
+        },
+        index=df.index,
+    )
+
+
+def _confirmed_and_prev(val_series: pd.Series, n: int) -> Tuple[pd.Series, pd.Series]:
+    """
+    由樞紐值序列（NaN 除樞紐當根）算出：截至各 bar「已確認」的最近樞紐值(now)
+    與其前一個已確認樞紐值(prev)。確認延遲 = n 根（樞紐 i 於 i+n 方可用）。全向量化。
+    """
+    confirmed = val_series.shift(n)                 # 樞紐值於 i+n 現身（已確認時點）
+    events = confirmed.dropna()
+    prev = pd.Series(np.nan, index=val_series.index)
+    prev.loc[events.index] = events.shift(1).values
+    return confirmed.ffill(), prev.ffill()
+
+
+def classify_structure(df: pd.DataFrame, n: int = 2) -> pd.DataFrame:
+    """
+    由「已確認」樞紐序列判定 HH/HL/LH/LL 與趨勢偏向（spec 007；看前偏誤安全）。
+
+    回傳 conf_swing_high / conf_swing_low（截至各 bar 已確認的最近 swing 值）與
+    trend_bias（+1 上升 / -1 下降 / 0 不明）：更高的 swing 高且更高的 swing 低為
+    上升；更低的 swing 高且更低的 swing 低為下降；其餘不明。
+    """
+    sp = detect_swing_points(df, n=n)
+    sh_now, sh_prev = _confirmed_and_prev(sp['swing_high_val'], n)
+    sl_now, sl_prev = _confirmed_and_prev(sp['swing_low_val'], n)
+    higher_high = sh_now > sh_prev
+    higher_low = sl_now > sl_prev
+    lower_high = sh_now < sh_prev
+    lower_low = sl_now < sl_prev
+    trend_bias = pd.Series(0, index=df.index, dtype=int)
+    trend_bias[higher_high & higher_low] = 1
+    trend_bias[lower_high & lower_low] = -1
+    return pd.DataFrame(
+        {
+            'conf_swing_high': sh_now,
+            'conf_swing_low': sl_now,
+            'trend_bias': trend_bias,
+        },
+        index=df.index,
+    )
+
+
 def detect_market_structure(df: pd.DataFrame, period: int = 20, *,
                             use_fvg: bool = False,
-                            fvg_lookback: int = 3) -> Tuple[pd.Series, pd.Series]:
+                            fvg_lookback: int = 3,
+                            swing_n: int = 2,
+                            volume_mult: float = 1.5) -> Tuple[pd.Series, pd.Series]:
     """
-    偵測市場結構連續 (BOS) 與結構破壞 (MSS)
-    嚴格執行 .shift(1) 以防禦「看前偏誤 (Look-Ahead Bias)」。
+    偵測市場結構連續 (BOS) 與結構破壞/反轉 (MSS)。
+    嚴格執行 .shift(1) / .shift(swing_n) 以防禦「看前偏誤 (Look-Ahead Bias)」。
 
-    spec 002：use_fvg=True 時，MSS 訊號須近 fvg_lookback 根內有同向 FVG 才成立
-    （假訊號歸零）；BOS 不受影響。use_fvg=False 時輸出與 spec 001 基準逐位元相同。
+    spec 007：MSS 校正為理論的反轉訊號——上升結構中收盤跌破最近『已確認』HL
+    為看跌反轉、下降結構中突破最近『已確認』LH 為看漲反轉，並需位移確認。
+    BOS 續勢語意（突破同向 rolling 波段點）維持不變；MSS 與 BOS 語意分離、不再是
+    子集（同 bar 同向以 ~BOS 保證互斥）。
+    spec 002：use_fvg=True 時，MSS 須近 fvg_lookback 根內有同向 FVG 才成立
+    （假訊號歸零）；BOS 不受影響。
     """
     # 滾動計算波段最高/最低點，移位一根 K 線以代表決策當下可取得的歷史數據
     rolling_high = df['high'].rolling(window=period).max().shift(1)
@@ -160,16 +236,26 @@ def detect_market_structure(df: pd.DataFrame, period: int = 20, *,
     # 看跌 BOS: 當前收盤價跌破前 N 週期最低價
     bear_bos = (df['close'] < rolling_low)
     
-    # MSS (結構破壞)：突破反向波段點，需伴隨強力位移 (Displacement)
-    # 此處簡化示意：當收盤價強烈反向突破，且成交量高於 20 週期均量的 1.5 倍
+    # MSS 反轉（spec 007）：反向「已確認」波段點被突破 + 位移確認（Displacement）。
+    # 趨勢偏向由已確認碎形結構（HH/HL/LH/LL）判定；看前偏誤由 classify_structure 內
+    # shift(swing_n) 確認延遲保證。位移沿用量能 proxy（門檻乘數集中至 volume_mult）。
     vol_ma = df['volume'].rolling(window=period).mean().shift(1)
-    strong_volume = df['volume'] > (vol_ma * 1.5)
-    
-    bull_mss = (df['close'] > rolling_high) & strong_volume
-    bear_mss = (df['close'] < rolling_low) & strong_volume
+    displacement = df['volume'] > (vol_ma * volume_mult)
 
-    # FVG 確認（spec 002）：MSS 只在近 fvg_lookback 根內有同向 FVG 時保留，否則歸零。
-    # use_fvg=False 完全不進入此分支，輸出與 spec 001 逐位元相同（迴歸閘門錨點）。
+    structure = classify_structure(df, n=swing_n)
+    trend_up = structure['trend_bias'] == 1
+    trend_down = structure['trend_bias'] == -1
+
+    # 看跌反轉：上升結構中收盤跌破最近已確認 HL(=最近已確認 swing low)
+    bear_mss = (trend_up & (df['close'] < structure['conf_swing_low'])
+                & displacement & (~bear_bos)).fillna(False)
+    # 看漲反轉：下降結構中收盤突破最近已確認 LH(=最近已確認 swing high)
+    bull_mss = (trend_down & (df['close'] > structure['conf_swing_high'])
+                & displacement & (~bull_bos)).fillna(False)
+
+    # FVG 確認（spec 002；現套於校正後的 MSS）：MSS 只在近 fvg_lookback 根內有
+    # 同向 FVG 時保留，否則歸零。use_fvg=False 時不進入此分支（spec 007 後 MSS 語意
+    # 已變，不再與 spec 001 位元一致；進場層以 mss_reversal_entry=False 提供回歸錨點）。
     if use_fvg:
         fvg_up_present = (
             _detect_fvg(df, "up").rolling(fvg_lookback).max().fillna(False).astype(bool)
@@ -397,7 +483,9 @@ def build_indicator_frame(df: pd.DataFrame,
                           include_regime: bool = True,
                           regime_kwargs: dict = None,
                           use_fvg: bool = False,
-                          fvg_lookback: int = 3) -> pd.DataFrame:
+                          fvg_lookback: int = 3,
+                          swing_n: int = 2,
+                          volume_mult: float = 1.5) -> pd.DataFrame:
     """
     正典指標組裝入口（spec 004，契約見 specs/004-acceptance-tests/contracts/）。
     回測引擎與即時監控共用此函式，消除兩端各自內聯的重複邏輯。
@@ -425,7 +513,8 @@ def build_indicator_frame(df: pd.DataFrame,
 
     # 結構與階梯計算
     mss, bos = detect_market_structure(out, period=structure_period,
-                                       use_fvg=use_fvg, fvg_lookback=fvg_lookback)
+                                       use_fvg=use_fvg, fvg_lookback=fvg_lookback,
+                                       swing_n=swing_n, volume_mult=volume_mult)
     out['mss_signal'] = mss
     out['bos_signal'] = bos
     out['ladder'] = calculate_ladder_levels(out, out['atr'], k=ladder_k)

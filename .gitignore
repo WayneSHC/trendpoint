@@ -25,3 +25,4 @@ data/
 多空階梯*.txt
 產品需求文件*
 local_docs/
+.venv/

@@ -12,7 +12,7 @@ TrendPoint - 系統設定驗證規格模組 (Configuration Spec)
 
 import os
 import yaml
-from typing import List, Dict
+from typing import List, Dict, Optional
 from pydantic import BaseModel, Field, ValidationError
 
 class DataConfig(BaseModel):
@@ -112,6 +112,25 @@ class SingleStrategyParams(BaseModel):
         default=3,
         ge=1,
         description="FVG 確認的回看根數 M；MSS 成立需近 M 根內出現同向 FVG"
+    )
+    swing_fractal_n: int = Field(
+        default=2,
+        ge=1,
+        description="對稱碎形強度 N：swing 高/低點需為 [i-N, i+N] 之極值；同時決定樞紐確認延遲 N 根（spec 007）"
+    )
+    mss_reversal_entry: bool = Field(
+        default=True,
+        description="是否啟用 MSS 反轉進場；False 復現 007 前的 BOS-only 進場（回歸/消融錨點，spec 007）"
+    )
+    mss_ladder_k: Optional[float] = Field(
+        default=None,
+        gt=0.0,
+        description="MSS 反轉進場的 ATR 追價乘數；None 時繼承 ladder_k（spec 007）"
+    )
+    mss_volume_mult: float = Field(
+        default=1.5,
+        gt=0.0,
+        description="MSS 位移（Displacement）確認的量能乘數：volume > 均量 × 此值（spec 007）"
     )
 
 class StrategyConfig(BaseModel):
