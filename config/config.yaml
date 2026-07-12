@@ -8,6 +8,8 @@ data:
   - 00878.TW
   - 00919.TW
   - 00631L.TW
+data_quality:
+  max_close_jump_ratio: 3.0
 strategy:
   default:
     atr_period: 14

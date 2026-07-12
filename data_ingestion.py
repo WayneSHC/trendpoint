@@ -11,6 +11,7 @@ TrendPoint - 數據收集與清洗模組 (Data Ingestion Module)
 3. 提供 CSV 檔案持久化與 SQLite 資料庫寫入介面。
 """
 
+import logging
 import os
 import sqlite3
 import pandas as pd
@@ -18,6 +19,8 @@ import yfinance as yf
 from security_utils import rate_limiter
 from db_security import safe_save_to_sqlite
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 @rate_limiter(calls=5, period=60)
 def fetch_stock_data(ticker: str, period: str = "1mo", interval: str = "1d", auto_adjust: bool = True) -> Optional[pd.DataFrame]:
@@ -91,41 +94,72 @@ def clean_kline_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         cleaned_df = cleaned_df.ffill()
         n_head_drop = int(cleaned_df.isna().any(axis=1).sum())
         cleaned_df = cleaned_df.dropna()
-        print(f"警告：資料清洗以 ffill 填補了 {n_missing - n_head_drop} 列缺值，"
-              f"並剔除序列開頭無法前向填補的 {n_head_drop} 列。")
+        logger.warning("資料清洗以 ffill 填補了 %d 列缺值，並剔除序列開頭無法前向填補的 %d 列。",
+                       n_missing - n_head_drop, n_head_drop)
 
     return cleaned_df
 
-def validate_data_contract(df: pd.DataFrame) -> bool:
+def validate_data_contract(df: pd.DataFrame, *, quality=None) -> bool:
     """
     驗證資料是否符合時序資料合約規格 (Data Contract Spec)
     - 必須包含 datetime 索引 (DatetimeIndex)
     - 欄位必須完整包含 open, high, low, close, volume
-    - 價格與成交量不可包含負數
+    - 價格必須為正（>0）；成交量不可為負（允許 0）
     - 不能含有 NaN 缺失值
+    - 相鄰收盤跳動不得超過 max_close_jump_ratio（離群值防呆，憲法 VI）
+
+    參數:
+        quality: DataQualityConfig；預設 None 時自 load_config() 取用。
+                 契約規則與閾值來源見
+                 specs/004-acceptance-tests/contracts/data-contract.md。
+
+    任一規則違反一律 raise ValueError（不靜默過濾）；離群值相關違反在拋出前
+    先發出 logging.warning，供上游告警與稽核。
     """
     if df is None or df.empty:
         raise ValueError("資料合約驗證失敗：DataFrame 為空")
-        
+
     # 1. 驗證索引是否為 DatetimeIndex
     if not isinstance(df.index, pd.DatetimeIndex):
         raise ValueError("資料合約驗證失敗：索引必須為 DatetimeIndex")
-        
+
     # 2. 驗證欄位是否完整
     required_cols = {"open", "high", "low", "close", "volume"}
     missing_cols = required_cols - set(df.columns)
     if missing_cols:
         raise ValueError(f"資料合約驗證失敗：缺少必要欄位 {missing_cols}")
-        
+
     # 3. 驗證有無 NaN
     if df[list(required_cols)].isnull().any().any():
         raise ValueError("資料合約驗證失敗：資料中包含 NaN 缺失值")
-        
-    # 4. 驗證數值範圍 (價格與交易量必須大於等於 0)
-    for col in required_cols:
-        if (df[col] < 0.0).any():
-            raise ValueError(f"資料合約驗證失敗：欄位 {col} 包含負數值")
-            
+
+    # 4. 驗證數值範圍：價格須為正（0 視為資料錯誤），成交量允許 0 但不可為負
+    price_cols = ["open", "high", "low", "close"]
+    for col in price_cols:
+        bad = df[col] <= 0.0
+        if bad.any():
+            ts = df.index[bad][0]
+            val = df[col][bad].iloc[0]
+            logger.warning("資料離群：欄位 %s 於 %s 出現非正價格 %.6g", col, ts, val)
+            raise ValueError(f"資料合約驗證失敗：欄位 {col} 包含非正價格（<= 0）")
+    if (df["volume"] < 0.0).any():
+        raise ValueError("資料合約驗證失敗：欄位 volume 包含負數值")
+
+    # 5. 相鄰收盤跳動離群偵測（閾值集中於 config，憲法 V）
+    if quality is None:
+        from config import load_config
+        quality = load_config().data_quality
+    jump = df["close"].pct_change().iloc[1:].abs()
+    over = jump > quality.max_close_jump_ratio
+    if over.any():
+        ts = jump.index[over][0]
+        ratio = jump[over].iloc[0]
+        logger.warning("資料離群：收盤價於 %s 跳動比率 %.4g 超過上限 %.4g",
+                       ts, ratio, quality.max_close_jump_ratio)
+        raise ValueError(
+            f"資料合約驗證失敗：相鄰收盤跳動 {ratio:.4g} 超過上限 "
+            f"{quality.max_close_jump_ratio:.4g}（疑似資料錯誤）")
+
     return True
 
 def save_to_csv(df: pd.DataFrame, filepath: str) -> bool:

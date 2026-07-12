@@ -37,4 +37,4 @@ jobs:
       - name: 驗證無 Numba 環境之降級回退
         run: |
           pip uninstall -y numba
-          pytest -q tests/test_ladder_system.py tests/test_lookahead_bias.py
+          pytest -q tests/test_ladder_system.py tests/test_lookahead_bias.py tests/test_acceptance_parity.py

@@ -169,6 +169,17 @@ class PortfolioConfig(BaseModel):
         description="單一標的之最大資金權重上限，防止低波動標的吃掉整個組合"
     )
 
+class DataQualityConfig(BaseModel):
+    """
+    資料品質防呆設定（憲法 VI：離群值須過濾並發出警告）。
+    """
+    max_close_jump_ratio: float = Field(
+        default=3.0,
+        gt=0.0,
+        description="相鄰收盤跳動比率上限（|pct_change|）；超過即判資料離群並拒絕整批。"
+                    "台股現貨有 10% 漲跌幅限制，預設 3.0（±300%）僅攔截歸零／千倍級的資料錯誤。"
+    )
+
 class SystemConfig(BaseModel):
     """
     全域系統配置規格模型
@@ -178,6 +189,7 @@ class SystemConfig(BaseModel):
     strategy: StrategyConfig = Field(default_factory=StrategyConfig)
     trading_cost: TradingCostConfig = Field(default_factory=TradingCostConfig)
     portfolio: PortfolioConfig = Field(default_factory=PortfolioConfig)
+    data_quality: DataQualityConfig = Field(default_factory=DataQualityConfig)
 
 def load_config(config_path: str = None) -> SystemConfig:
     """

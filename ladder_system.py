@@ -350,6 +350,71 @@ def calculate_bollinger_bands(series: pd.Series, period: int = 20, num_std: floa
     lower = middle - num_std * std
     return upper.fillna(series), middle.fillna(series), lower.fillna(series)
 
+def build_indicator_frame(df: pd.DataFrame,
+                          *,
+                          structure_period: int,
+                          atr_period: int = 14,
+                          ladder_k: float = 2.0,
+                          chandelier_period: int = 22,
+                          chandelier_multiplier: float = 3.0,
+                          include_regime: bool = True,
+                          regime_kwargs: dict = None) -> pd.DataFrame:
+    """
+    正典指標組裝入口（spec 004，契約見 specs/004-acceptance-tests/contracts/）。
+    回測引擎與即時監控共用此函式，消除兩端各自內聯的重複邏輯。
+
+    時序契約：第 i 列僅依賴 df.iloc[:i+1]（結構訊號的 rolling 已 shift(1)、
+    三關價只用昨日完成值）。chandelier 欄位不做 shift——呼叫端負責
+    timebase（回測引擎取判定根的前一根），此處加 shift 會造成雙重延遲。
+
+    參數一律由呼叫端自 config 傳入；本函式不讀組態、不硬編碼可調參數。
+    include_regime=False 時省略 regime_ok 欄位（監控端不需市況濾網）。
+    回傳新 DataFrame，不就地修改輸入。
+    """
+    out = df.copy()
+
+    # 真實波幅與 ATR
+    tr = calculate_tr(out['high'], out['low'], out['close'])
+    out['atr'] = calculate_atr(tr, period=atr_period)
+    out['vwap'] = calculate_vwap(out)
+
+    # 市況濾網 (Regime Filter)：ADX 趨勢強度 + 長均線方向 + ER 噪音
+    if include_regime:
+        out['regime_ok'] = calculate_regime_filter(out, **(regime_kwargs or {}))
+
+    # 結構與階梯計算
+    mss, bos = detect_market_structure(out, period=structure_period)
+    out['mss_signal'] = mss
+    out['bos_signal'] = bos
+    out['ladder'] = calculate_ladder_levels(out, out['atr'], k=ladder_k)
+
+    # 吊燈止損線
+    ch_long, ch_short = calculate_chandelier_exit(
+        out, out['atr'], period=chandelier_period, multiplier=chandelier_multiplier)
+    out['chandelier_long'] = ch_long
+    out['chandelier_short'] = ch_short
+
+    # 日內開盤價：以當日第一筆交易之開盤價為基準
+    out['date'] = out.index.date
+    out['daily_open'] = out.groupby('date')['open'].transform('first')
+
+    # 三關價 (以日為單位，昨日最高/最低計算，當日使用)
+    # 此處使用分群求得每日的昨日最高與昨日最低
+    daily_ohlcv = out.groupby('date').agg({'high': 'max', 'low': 'min'})
+    yesterday_ohlcv = daily_ohlcv.shift(1) # 昨日日線數據
+
+    # 將昨日數據對接回分鐘線/日線 DataFrame 中
+    out['yesterday_high'] = out['date'].map(yesterday_ohlcv['high']).fillna(out['high'].iloc[0])
+    out['yesterday_low'] = out['date'].map(yesterday_ohlcv['low']).fillna(out['low'].iloc[0])
+
+    # 計算三關價
+    out['mid_price'] = (out['yesterday_high'] + out['yesterday_low']) / 2.0
+    out['diff'] = out['yesterday_high'] - out['yesterday_low']
+    out['upper_price'] = out['yesterday_low'] + out['diff'] * 1.382
+    out['lower_price'] = out['yesterday_high'] - out['diff'] * 1.382
+
+    return out
+
 # =========================================================================
 # 4. 進場確認與部位管理器 (Entry & Position Manager)
 # =========================================================================

@@ -16,13 +16,7 @@ import pandas as pd
 import numpy as np
 from typing import Dict, Any, List, Tuple
 from ladder_system import (
-    calculate_tr,
-    calculate_atr,
-    calculate_vwap,
-    detect_market_structure,
-    calculate_ladder_levels,
-    calculate_chandelier_exit,
-    calculate_regime_filter,
+    build_indicator_frame,
     PositionManager,
     ExitEvent,
     FULL_EXIT_EVENTS
@@ -115,53 +109,25 @@ class BacktestEngine:
         if verbose:
             print("開始進行策略回測...")
 
-        # 1. 預先計算所有技術指標，並進行時序移位以防看前偏誤
-        temp_df = df.copy()
-        tr = calculate_tr(temp_df['high'], temp_df['low'], temp_df['close'])
-        temp_df['atr'] = calculate_atr(tr, period=atr_period)
-        temp_df['vwap'] = calculate_vwap(temp_df)
-
-        # 市況濾網 (Regime Filter)：ADX 趨勢強度 + 長均線方向 + ER 噪音
-        if 'regime' in disabled_filters:
-            temp_df['regime_ok'] = True
-        else:
-            temp_df['regime_ok'] = calculate_regime_filter(
-                temp_df,
+        # 1. 預先計算所有技術指標（正典組裝入口：ladder_system.build_indicator_frame）
+        temp_df = build_indicator_frame(
+            df,
+            structure_period=10,
+            atr_period=atr_period,
+            ladder_k=k,
+            chandelier_period=ch_period,
+            chandelier_multiplier=ch_multiplier,
+            include_regime=('regime' not in disabled_filters),
+            regime_kwargs=dict(
                 use_adx=use_adx_filter, adx_period=adx_period, adx_threshold=adx_threshold,
                 use_ma=use_ma_filter, ma_period=ma_period,
                 use_er=use_er_filter, er_period=er_period, er_threshold=er_threshold
             )
-        
-        # 結構與階梯計算
-        mss, bos = detect_market_structure(temp_df, period=10)
-        temp_df['mss_signal'] = mss
-        temp_df['bos_signal'] = bos
-        temp_df['ladder'] = calculate_ladder_levels(temp_df, temp_df['atr'], k=k)
-        
-        # 吊燈止損線
-        ch_long, ch_short = calculate_chandelier_exit(temp_df, temp_df['atr'], period=ch_period, multiplier=ch_multiplier)
-        temp_df['chandelier_long'] = ch_long
-        temp_df['chandelier_short'] = ch_short
-        
-        # 日內開盤價：以當日第一筆交易之開盤價為基準
-        temp_df['date'] = temp_df.index.date
-        temp_df['daily_open'] = temp_df.groupby('date')['open'].transform('first')
-        
-        # 三關價 (以日為單位，昨日最高/最低計算，當日使用)
-        # 此處使用分群求得每日的昨日最高與昨日最低
-        daily_ohlcv = temp_df.groupby('date').agg({'high': 'max', 'low': 'min'})
-        yesterday_ohlcv = daily_ohlcv.shift(1) # 昨日日線數據
-        
-        # 將昨日數據對接回分鐘線/日線 DataFrame 中
-        temp_df['yesterday_high'] = temp_df['date'].map(yesterday_ohlcv['high']).fillna(temp_df['high'].iloc[0])
-        temp_df['yesterday_low'] = temp_df['date'].map(yesterday_ohlcv['low']).fillna(temp_df['low'].iloc[0])
-        
-        # 計算三關價
-        temp_df['mid_price'] = (temp_df['yesterday_high'] + temp_df['yesterday_low']) / 2.0
-        temp_df['diff'] = temp_df['yesterday_high'] - temp_df['yesterday_low']
-        temp_df['upper_price'] = temp_df['yesterday_low'] + temp_df['diff'] * 1.382
-        temp_df['lower_price'] = temp_df['yesterday_high'] - temp_df['diff'] * 1.382
-        
+        )
+        # 消融測試停用 regime 時，保持原語意：濾網欄位存在且恆為 True
+        if 'regime_ok' not in temp_df.columns:
+            temp_df['regime_ok'] = True
+
         # 2. 模擬交易迴圈
         capital = self.initial_capital
         position_shares = 0.0 # 持有股數

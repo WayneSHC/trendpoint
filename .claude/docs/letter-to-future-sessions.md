@@ -86,3 +86,17 @@ git 出現詭異損毀時第一個懷疑 Drive 同步衝突（找 `*conflicted c
   Long-Only**（決策記錄與重啟條件在 specs/003 檔頭），該規格不進入
   /speckit-plan。仍待使用者決定：搬離 Google Drive、裁剪 plugin、
   TrendPoint_OpenSpec.md 是否移入 docs/。
+- 2026-07-12 更新：**spec 004（驗收標準自動化）走完整 Spec Kit 流程
+  plan→tasks→implement 完成**，PR #9。三個驗收測試檔（parity/latency/
+  data-quality）落地，OpenSpec §6 四項驗收全數自動化；spec 001 SC-003~005
+  改指向實際測試檔。過程含兩處必要引擎/契約變更並附證明：(a) 抽出
+  `ladder_system.build_indicator_frame()` 消除 backtester/monitor 的重複
+  內聯（回測 CSV byte-identical、組合 8.22%/34 不變＝零差異重構）；
+  (b) `validate_data_contract` 補離群防呆（價格<=0 拒絕、收盤跳動比率上限，
+  閾值進 config `data_quality`）。parity 用「窮舉逐根重播」+ check_exact，
+  並以注入三關價看前偏誤證明有效（681 處不一致）。**關鍵洞察**：parity
+  守的是「未來資料回洩過去」（bfill/三關價類），拿掉已因果的 shift(1)
+  不會被它抓到——那是 test_lookahead_bias.py 的守備範圍，兩者互補。
+  下一個開發目標：spec 002（FVG 確認）。剩餘 Draft：002/005/006。
+  重建 trendpoint.db：`scratchpad/build_db.py` 從 data/*_daily.csv 灌，
+  表名 `stock_{ticker}_daily`。
