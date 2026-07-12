@@ -38,6 +38,7 @@ ABLATION_TARGETS = [
     ("停用波動確認 (1.2x ATR 位移)", "volatility"),
     ("停用全域濾網 (三關價+市況)", "global"),
     ("停用市況濾網 (ADX/長均線)", "regime"),
+    ("停用 FVG 確認", "fvg"),
 ]
 
 
@@ -66,6 +67,8 @@ def run_ablation_for_ticker(engine: BacktestEngine, cfg, ticker: str, df) -> lis
             use_er_filter=params.use_er_filter,
             er_period=params.er_period,
             er_threshold=params.er_threshold,
+            use_fvg=params.use_fvg,
+            fvg_lookback=params.fvg_lookback,
             disabled_filters=disabled_set,
             verbose=False
         )

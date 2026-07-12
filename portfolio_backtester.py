@@ -89,8 +89,11 @@ class PortfolioBacktester:
             temp_df['atr'] = calculate_atr(tr, period=params.atr_period)
             temp_df['vwap'] = calculate_vwap(temp_df)
             
-            # 結構與階梯
-            mss, bos = detect_market_structure(temp_df, period=10)
+            # 結構與階梯（spec 002：組合回測亦套 FVG 確認，與單標的路徑一致；
+            # 此處仍為內聯組裝，未走 build_indicator_frame——待 portfolio 一併重構時另議）
+            mss, bos = detect_market_structure(temp_df, period=10,
+                                               use_fvg=params.use_fvg,
+                                               fvg_lookback=params.fvg_lookback)
             temp_df['mss_signal'] = mss
             temp_df['bos_signal'] = bos
             temp_df['ladder'] = calculate_ladder_levels(temp_df, temp_df['atr'], k=params.ladder_k)

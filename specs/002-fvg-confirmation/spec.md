@@ -4,7 +4,7 @@
 
 **Created**: 2026-07-07
 
-**Status**: Draft
+**Status**: Implemented（2026-07-12；訊號層達成 SC-001，回測 P&L 零影響見 baseline-pre-fvg.md 的 mss⊆bos 發現）
 
 **Input**: 原 OpenSpec §4.1 要求「MSS 必須伴隨公平價值缺口（FVG）形成」，但程式碼從未實作。
 本規格將該條款自基準（spec 001）抽出，作為獨立功能交付。

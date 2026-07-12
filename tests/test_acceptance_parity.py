@@ -43,6 +43,16 @@ PARITY_COLUMNS = [
 
 _PARAMS = dict(structure_period=10, include_regime=False)
 
+# spec 002：FVG 確認也必須全因果——加 use_fvg=True 變體，確保 FVG 遮罩後的
+# mss_signal 仍滿足前綴一致性（零容差）。fvg_off 即 004 原基準路徑。
+_PARAM_VARIANTS = [
+    pytest.param(_PARAMS, id="fvg_off"),
+    pytest.param(
+        dict(structure_period=10, include_regime=False, use_fvg=True, fvg_lookback=3),
+        id="fvg_on",
+    ),
+]
+
 
 def _truncation_points(n: int, cadence: int | None) -> list[int]:
     """取樣 ~40 個截斷點：warmup 邊界密、日界密、中段均勻、尾部密。"""
@@ -68,6 +78,7 @@ def _truncation_points(n: int, cadence: int | None) -> list[int]:
     return sorted(p for p in pts if 2 <= p <= n)
 
 
+@pytest.mark.parametrize("params", _PARAM_VARIANTS)
 @pytest.mark.parametrize(
     "n,freq,cadence",
     [
@@ -75,16 +86,16 @@ def _truncation_points(n: int, cadence: int | None) -> list[int]:
         (500, "1D", None),  # 500 根日線
     ],
 )
-def test_prefix_consistency(n, freq, cadence):
+def test_prefix_consistency(n, freq, cadence, params):
     """全量計算的第 i 列 == 截斷於 i 的前綴末列（逐欄零容差）。"""
     df = make_klines(n, freq=freq)
-    full = build_indicator_frame(df, **_PARAMS)
+    full = build_indicator_frame(df, **params)
 
     points = _truncation_points(n, cadence)
     assert len(points) >= 30, f"截斷點取樣過少：{len(points)}"
 
     for i in points:
-        prefix = build_indicator_frame(df.iloc[:i], **_PARAMS)
+        prefix = build_indicator_frame(df.iloc[:i], **params)
         assert len(prefix) == i
         for col in PARITY_COLUMNS:
             pd.testing.assert_series_equal(
@@ -96,7 +107,8 @@ def test_prefix_consistency(n, freq, cadence):
             )
 
 
-def test_incremental_replay_exhaustive():
+@pytest.mark.parametrize("params", _PARAM_VARIANTS)
+def test_incremental_replay_exhaustive(params):
     """
     窮舉式逐根重播：對每一根 bar j，`build(df[:j+1])` 的末列必須等於
     `build(df)` 的第 j 列。這是 parity 的最強形式，也是 SC-002 有效性的
@@ -104,14 +116,15 @@ def test_incremental_replay_exhaustive():
     都輪流當末列，才能捕捉任何位置的未來資料洩漏（如把 .shift(1) 誤寫成
     .shift(-1)：全量的某根突破 bar 會偷看下一根，其值與該根當末列時的
     前綴不符）。取樣式測試會漏掉這種「僅末列差異」，故此處窮舉。
+    fvg_on 變體同時證明 FVG 遮罩（含 rolling 回看）不洩漏未來。
     """
     n = 250
     df = make_klines(n, freq="5min")
-    full = build_indicator_frame(df, **_PARAMS)
+    full = build_indicator_frame(df, **params)
 
     mismatches = []
     for j in range(1, n):  # j = 當前「最新已收盤」bar 的位置
-        last_row = build_indicator_frame(df.iloc[: j + 1], **_PARAMS).iloc[-1]
+        last_row = build_indicator_frame(df.iloc[: j + 1], **params).iloc[-1]
         full_row = full.iloc[j]
         for col in PARITY_COLUMNS:
             a, b = last_row[col], full_row[col]

@@ -102,7 +102,9 @@ def run():
                 ma_period=params.ma_period,
                 use_er_filter=params.use_er_filter,
                 er_period=params.er_period,
-                er_threshold=params.er_threshold
+                er_threshold=params.er_threshold,
+                use_fvg=params.use_fvg,
+                fvg_lookback=params.fvg_lookback
             )
             
             summary = results["summary"]

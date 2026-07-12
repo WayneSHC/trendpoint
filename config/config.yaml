@@ -17,6 +17,8 @@ strategy:
     chandelier_period: 22
     ladder_k: 2.0
     time_limit: 15
+    use_fvg: true
+    fvg_lookback: 3
   ticker_overrides:
     0050.TW:
       atr_period: 10
