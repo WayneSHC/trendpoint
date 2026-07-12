@@ -38,10 +38,13 @@ f8f624f340b4981819eb4d1f8533a40599ad6784bb8558bcb42f5734c220cfd1  data/2330_TW_b
 - 尾三列數值已記錄於腳本輸出（atr≈0.827/0.814/0.827、ladder≈99.632、
   mid≈100.735、upper≈104.788、lower≈96.683）
 
-## T007 迴歸閘門（填寫於重構後）
+## T007 迴歸閘門（重構後結果：全數通過，2026-07-12）
 
-- [ ] `run_backtest.py` 五標的：報酬率/筆數/勝率/淨值逐位相同
-- [ ] `run_portfolio_backtest.py`：8.22% / 34 筆逐位相同
-- [ ] 六個 trades CSV sha256 逐一相同
-- [ ] `build_indicator_frame(include_regime=False)` vs 凍結副本：同 df 全欄位零差異
-- [ ] `pytest -q` 全綠
+- [x] `run_backtest.py` 五標的：報酬率/筆數逐位相同（15.83%/11、8.80%/12、−0.78%/8、10.00%/5、22.01%/8）
+- [x] `run_portfolio_backtest.py`：**8.22% / 34 筆**逐位相同
+- [x] 六個 trades CSV sha256 逐一相同（見上方雜湊；`diff -q` 全部 IDENTICAL）
+- [x] `build_indicator_frame(include_regime=False)` vs 凍結副本：同 df 十個欄位全部零差異（`assert_series_equal` 通過）
+- [x] `pytest -q` 全綠（60 passed）
+
+**結論**：`build_indicator_frame()` 抽取為純機械重構——回測與監控兩端輸出
+逐位元不變，重構無害性成立（憲法 I + 工作流程第 3 條）。

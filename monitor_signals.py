@@ -115,30 +115,10 @@ def check_new_signals(ticker: str, alert_mgr: AlertManager):
         return
 
     # 2. 計算技術指標與多空訊號
-    # 真實波幅與 ATR
-    tr = ladder_system.calculate_tr(df['high'], df['low'], df['close'])
-    df['atr'] = ladder_system.calculate_atr(tr, period=14)
-    df['vwap'] = ladder_system.calculate_vwap(df)
-    
-    # 結構訊號
-    mss, bos = ladder_system.detect_market_structure(df, period=10)
-    df['mss'] = mss
-    df['bos'] = bos
-    
-    # 多空階梯軌跡
-    df['ladder'] = ladder_system.calculate_ladder_levels(df, df['atr'], k=2.0)
-    
-    # 計算今日三關價
-    df['date'] = df.index.date
-    daily_ohlcv = df.groupby('date').agg({'high': 'max', 'low': 'min'})
-    yesterday_ohlcv = daily_ohlcv.shift(1)
-    
-    df['yesterday_high'] = df['date'].map(yesterday_ohlcv['high']).fillna(df['high'].iloc[0])
-    df['yesterday_low'] = df['date'].map(yesterday_ohlcv['low']).fillna(df['low'].iloc[0])
-    df['mid_price'] = (df['yesterday_high'] + df['yesterday_low']) / 2.0
-    df['diff'] = df['yesterday_high'] - df['yesterday_low']
-    df['upper_price'] = df['yesterday_low'] + df['diff'] * 1.382
-    df['lower_price'] = df['yesterday_high'] - df['diff'] * 1.382
+    # 正典組裝入口：與回測引擎共用 ladder_system.build_indicator_frame，
+    # 消除兩端重複內聯。監控端不需市況濾網，故 include_regime=False。
+    df = ladder_system.build_indicator_frame(
+        df, structure_period=10, include_regime=False)
 
     # 3. 取得最新「已收盤」的 K 線與其前一根進行突破判斷。
     # 盤中末根是進行中的 bar，不得用於訊號判定（repaint 防禦）
@@ -156,14 +136,14 @@ def check_new_signals(ticker: str, alert_mgr: AlertManager):
     # 4. 判定與推播訊號
     # 訊號 A：MSS 結構破壞 (1為多頭突破，-1為空頭突破)
     # 訊號決策採用上一根已關閉 K 線的訊號，防範看前偏誤與訊號飄移
-    if latest_bar['mss'] == 1:
+    if latest_bar['mss_signal'] == 1:
         alert_type = "BULLISH_MSS"
         if not is_alert_already_sent(ticker, latest_time, alert_type):
             msg = f"<b>【多頭反轉訊號】</b>\n標的: {ticker}\n時間: {latest_time}\n價格: {latest_bar['close']}\n說明: 偵測到最新 K 線看漲 MSS 結構破壞，大成交量突破前高，趨勢可能反轉向上！\n當前階梯參考價: {latest_bar['ladder']:.2f}"
             if alert_mgr.send_alert(msg):
                 mark_alert_as_sent(ticker, latest_time, alert_type)
                 
-    elif latest_bar['mss'] == -1:
+    elif latest_bar['mss_signal'] == -1:
         alert_type = "BEARISH_MSS"
         if not is_alert_already_sent(ticker, latest_time, alert_type):
             msg = f"<b>【空頭反轉訊號】</b>\n標的: {ticker}\n時間: {latest_time}\n價格: {latest_bar['close']}\n說明: 偵測到最新 K 線看跌 MSS 結構破壞，大成交量跌破前低，趨勢可能反向做空！\n當前階梯參考價: {latest_bar['ladder']:.2f}"
@@ -171,14 +151,14 @@ def check_new_signals(ticker: str, alert_mgr: AlertManager):
                 mark_alert_as_sent(ticker, latest_time, alert_type)
 
     # 訊號 B：BOS 趨勢延續 (1為多頭強勢突破，-1為空頭強勢突破)
-    if latest_bar['bos'] == 1:
+    if latest_bar['bos_signal'] == 1:
         alert_type = "BULLISH_BOS"
         if not is_alert_already_sent(ticker, latest_time, alert_type):
             msg = f"<b>【多頭趨勢延續】</b>\n標的: {ticker}\n時間: {latest_time}\n價格: {latest_bar['close']}\n說明: 偵測到 BOS 結構連續突破，多頭力道持續加強！\n當前階梯參考價: {latest_bar['ladder']:.2f}"
             if alert_mgr.send_alert(msg):
                 mark_alert_as_sent(ticker, latest_time, alert_type)
                 
-    elif latest_bar['bos'] == -1:
+    elif latest_bar['bos_signal'] == -1:
         alert_type = "BEARISH_BOS"
         if not is_alert_already_sent(ticker, latest_time, alert_type):
             msg = f"<b>【空頭趨勢延續】</b>\n標的: {ticker}\n時間: {latest_time}\n價格: {latest_bar['close']}\n說明: 偵測到 BOS 結構連續跌破，空頭趨勢強烈加壓！\n當前階梯參考價: {latest_bar['ladder']:.2f}"
