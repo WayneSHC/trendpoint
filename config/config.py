@@ -104,6 +104,15 @@ class SingleStrategyParams(BaseModel):
         ge=0.0, le=1.0,
         description="ER 低於此值視為高噪音盤整，不觸發進場"
     )
+    use_fvg: bool = Field(
+        default=True,
+        description="MSS 訊號是否需近 M 根內同向 FVG（公平價值缺口）確認，過濾假訊號"
+    )
+    fvg_lookback: int = Field(
+        default=3,
+        ge=1,
+        description="FVG 確認的回看根數 M；MSS 成立需近 M 根內出現同向 FVG"
+    )
 
 class StrategyConfig(BaseModel):
     """

@@ -117,8 +117,11 @@ def check_new_signals(ticker: str, alert_mgr: AlertManager):
     # 2. 計算技術指標與多空訊號
     # 正典組裝入口：與回測引擎共用 ladder_system.build_indicator_frame，
     # 消除兩端重複內聯。監控端不需市況濾網，故 include_regime=False。
+    # 即時告警亦套 FVG 確認（spec 002 R6，減少假反轉告警）；monitor 現不穿線
+    # strategy 參數，故用常數預設 use_fvg=True, fvg_lookback=3。
     df = ladder_system.build_indicator_frame(
-        df, structure_period=10, include_regime=False)
+        df, structure_period=10, include_regime=False,
+        use_fvg=True, fvg_lookback=3)
 
     # 3. 取得最新「已收盤」的 K 線與其前一根進行突破判斷。
     # 盤中末根是進行中的 bar，不得用於訊號判定（repaint 防禦）

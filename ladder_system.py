@@ -120,10 +120,35 @@ def calculate_vwap(df: pd.DataFrame) -> pd.Series:
 # 2. 市場結構與階梯運算模組 (Market Structure & Ladder)
 # =========================================================================
 
-def detect_market_structure(df: pd.DataFrame, period: int = 20) -> Tuple[pd.Series, pd.Series]:
+def _detect_fvg(df: pd.DataFrame, direction: str) -> pd.Series:
+    """
+    偵測 bar t 是否形成 FVG（公平價值缺口，Fair Value Gap），三根 K 線結構。
+
+    direction ∈ {"up","down"}：
+      - "up"（向上/看漲缺口）：low(t) > high(t-2)
+      - "down"（向下/看跌缺口）：high(t) < low(t-2)
+
+    回傳 bool 序列，與 df.index 對齊；前 2 根為 False（shift(2) 為 NaN，
+    與 NaN 比較恆為 False）。純向量化，因果——bar t 只用 t 與 t-2（皆已收盤）。
+    """
+    if direction == "up":
+        result = df['low'] > df['high'].shift(2)
+    elif direction == "down":
+        result = df['high'] < df['low'].shift(2)
+    else:
+        raise ValueError(f"direction 必須為 'up' 或 'down'，收到 {direction!r}")
+    return result.astype(bool)
+
+
+def detect_market_structure(df: pd.DataFrame, period: int = 20, *,
+                            use_fvg: bool = False,
+                            fvg_lookback: int = 3) -> Tuple[pd.Series, pd.Series]:
     """
     偵測市場結構連續 (BOS) 與結構破壞 (MSS)
     嚴格執行 .shift(1) 以防禦「看前偏誤 (Look-Ahead Bias)」。
+
+    spec 002：use_fvg=True 時，MSS 訊號須近 fvg_lookback 根內有同向 FVG 才成立
+    （假訊號歸零）；BOS 不受影響。use_fvg=False 時輸出與 spec 001 基準逐位元相同。
     """
     # 滾動計算波段最高/最低點，移位一根 K 線以代表決策當下可取得的歷史數據
     rolling_high = df['high'].rolling(window=period).max().shift(1)
@@ -142,7 +167,19 @@ def detect_market_structure(df: pd.DataFrame, period: int = 20) -> Tuple[pd.Seri
     
     bull_mss = (df['close'] > rolling_high) & strong_volume
     bear_mss = (df['close'] < rolling_low) & strong_volume
-    
+
+    # FVG 確認（spec 002）：MSS 只在近 fvg_lookback 根內有同向 FVG 時保留，否則歸零。
+    # use_fvg=False 完全不進入此分支，輸出與 spec 001 逐位元相同（迴歸閘門錨點）。
+    if use_fvg:
+        fvg_up_present = (
+            _detect_fvg(df, "up").rolling(fvg_lookback).max().fillna(False).astype(bool)
+        )
+        fvg_down_present = (
+            _detect_fvg(df, "down").rolling(fvg_lookback).max().fillna(False).astype(bool)
+        )
+        bull_mss = bull_mss & fvg_up_present
+        bear_mss = bear_mss & fvg_down_present
+
     # 轉換為訊號序列 (1 代表多頭訊號，-1 代表空頭訊號，0 代表無訊號)
     bos_signal = pd.Series(0, index=df.index)
     bos_signal[bull_bos] = 1
@@ -358,7 +395,9 @@ def build_indicator_frame(df: pd.DataFrame,
                           chandelier_period: int = 22,
                           chandelier_multiplier: float = 3.0,
                           include_regime: bool = True,
-                          regime_kwargs: dict = None) -> pd.DataFrame:
+                          regime_kwargs: dict = None,
+                          use_fvg: bool = False,
+                          fvg_lookback: int = 3) -> pd.DataFrame:
     """
     正典指標組裝入口（spec 004，契約見 specs/004-acceptance-tests/contracts/）。
     回測引擎與即時監控共用此函式，消除兩端各自內聯的重複邏輯。
@@ -369,6 +408,8 @@ def build_indicator_frame(df: pd.DataFrame,
 
     參數一律由呼叫端自 config 傳入；本函式不讀組態、不硬編碼可調參數。
     include_regime=False 時省略 regime_ok 欄位（監控端不需市況濾網）。
+    use_fvg 預設 False（baseline-preserving）：不帶此參數的既有呼叫（含 004 parity）
+    行為不變；呼叫端須顯式 use_fvg=True 才啟用 spec 002 的 FVG 確認。
     回傳新 DataFrame，不就地修改輸入。
     """
     out = df.copy()
@@ -383,7 +424,8 @@ def build_indicator_frame(df: pd.DataFrame,
         out['regime_ok'] = calculate_regime_filter(out, **(regime_kwargs or {}))
 
     # 結構與階梯計算
-    mss, bos = detect_market_structure(out, period=structure_period)
+    mss, bos = detect_market_structure(out, period=structure_period,
+                                       use_fvg=use_fvg, fvg_lookback=fvg_lookback)
     out['mss_signal'] = mss
     out['bos_signal'] = bos
     out['ladder'] = calculate_ladder_levels(out, out['atr'], k=ladder_k)

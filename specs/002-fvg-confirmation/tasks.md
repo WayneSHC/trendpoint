@@ -25,7 +25,7 @@
 **Purpose**: 取 FVG 前基準（迴歸閘門錨點）與新增組態參數。**基準必須在任何引擎改碼前落檔並 push**（session/scratchpad 不耐久教訓）。
 
 - [x] T001 取 FVG 前基準：跑 `python run_backtest.py` 與 `python run_portfolio_backtest.py`，記錄五標的報酬/筆數/勝率、組合 8.22%/34、六個 `data/*_backtest_trades.csv` 的 sha256 至 `specs/002-fvg-confirmation/baseline-pre-fvg.md`。**完成即 commit + push**
-- [ ] T002 [P] 組態：`config/config.py` 的 `SingleStrategyParams` 新增 `use_fvg: bool = Field(default=True, ...)` 與 `fvg_lookback: int = Field(default=3, ge=1, ...)`；`config/config.yaml` 的 `strategy.default` 加 `use_fvg: true` / `fvg_lookback: 3`；若 `tests/test_config.py` 有 schema 覆蓋則同步
+- [x] T002 [P] 組態：`config/config.py` 的 `SingleStrategyParams` 新增 `use_fvg: bool = Field(default=True, ...)` 與 `fvg_lookback: int = Field(default=3, ge=1, ...)`；`config/config.yaml` 的 `strategy.default` 加 `use_fvg: true` / `fvg_lookback: 3`；若 `tests/test_config.py` 有 schema 覆蓋則同步
 
 ---
 
@@ -37,12 +37,12 @@
 
 ### Implementation for User Story 1
 
-- [ ] T003 [US1] 在 `ladder_system.py` 新增 `_detect_fvg(df, direction) -> pd.Series`（契約見 contracts/fvg-detection.md）：`up` = `df['low'] > df['high'].shift(2)`，`down` = `df['high'] < df['low'].shift(2)`；回傳 bool、前 2 根 False、純向量化
-- [ ] T004 [US1] 擴充 `ladder_system.py` 的 `detect_market_structure`：新增 keyword-only `use_fvg: bool = False, fvg_lookback: int = 3`；`use_fvg=True` 時以 `_detect_fvg(...).rolling(fvg_lookback).max().fillna(False).astype(bool)` 之同向遮罩閘門 `mss_signal`（真值表見 data-model.md §2）；`bos_signal` 與 `use_fvg=False` 路徑逐位元不變
-- [ ] T005 [US1] 擴充 `ladder_system.py` 的 `build_indicator_frame`：新增 keyword-only `use_fvg: bool = False, fvg_lookback: int = 3`，原樣轉發給 `detect_market_structure`（預設 False 確保 004 既有 parity 呼叫不變）
-- [ ] T006 [US1] 擴充 `backtester.py` 的 `run_backtest`：新增 `use_fvg`、`fvg_lookback` kwargs；計算 `effective_use_fvg = use_fvg and ('fvg' not in disabled_filters)`，連同 `fvg_lookback` 傳入 `build_indicator_frame`（比照 `include_regime` 模式）
-- [ ] T007 [US1] 穿線呼叫端：`run_backtest.py` 把 `params.use_fvg`/`params.fvg_lookback` 傳入 `run_backtest`；`run_ablation.py` 同樣穿線，並在 `ABLATION_TARGETS` 加 `("停用 FVG 確認", "fvg")`
-- [ ] T008 [US1] `monitor_signals.py`：`check_new_signals` 的 `build_indicator_frame` 呼叫加 `use_fvg=True, fvg_lookback=3`（即時告警亦套 FVG，research.md R6）
+- [x] T003 [US1] 在 `ladder_system.py` 新增 `_detect_fvg(df, direction) -> pd.Series`（契約見 contracts/fvg-detection.md）：`up` = `df['low'] > df['high'].shift(2)`，`down` = `df['high'] < df['low'].shift(2)`；回傳 bool、前 2 根 False、純向量化
+- [x] T004 [US1] 擴充 `ladder_system.py` 的 `detect_market_structure`：新增 keyword-only `use_fvg: bool = False, fvg_lookback: int = 3`；`use_fvg=True` 時以 `_detect_fvg(...).rolling(fvg_lookback).max().fillna(False).astype(bool)` 之同向遮罩閘門 `mss_signal`（真值表見 data-model.md §2）；`bos_signal` 與 `use_fvg=False` 路徑逐位元不變
+- [x] T005 [US1] 擴充 `ladder_system.py` 的 `build_indicator_frame`：新增 keyword-only `use_fvg: bool = False, fvg_lookback: int = 3`，原樣轉發給 `detect_market_structure`（預設 False 確保 004 既有 parity 呼叫不變）
+- [x] T006 [US1] 擴充 `backtester.py` 的 `run_backtest`：新增 `use_fvg`、`fvg_lookback` kwargs；計算 `effective_use_fvg = use_fvg and ('fvg' not in disabled_filters)`，連同 `fvg_lookback` 傳入 `build_indicator_frame`（比照 `include_regime` 模式）
+- [x] T007 [US1] 穿線呼叫端：`run_backtest.py` 把 `params.use_fvg`/`params.fvg_lookback` 傳入 `run_backtest`；`run_ablation.py` 同樣穿線，並在 `ABLATION_TARGETS` 加 `("停用 FVG 確認", "fvg")`
+- [x] T008 [US1] `monitor_signals.py`：`check_new_signals` 的 `build_indicator_frame` 呼叫加 `use_fvg=True, fvg_lookback=3`（即時告警亦套 FVG，research.md R6）
 
 **Checkpoint**: FVG 核心就緒，管線全通（回測、消融、監控）
 

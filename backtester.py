@@ -80,6 +80,8 @@ class BacktestEngine:
                      use_er_filter: bool = False,
                      er_period: int = 10,
                      er_threshold: float = 0.3,
+                     use_fvg: bool = False,
+                     fvg_lookback: int = 3,
                      disabled_filters: frozenset = frozenset(),
                      verbose: bool = True) -> Dict[str, Any]:
         """
@@ -100,7 +102,9 @@ class BacktestEngine:
             use_er_filter (bool): 啟用 Kaufman ER 噪音濾網
             er_period (int): ER 週期
             er_threshold (float): ER 低於此值視為高噪音
-            disabled_filters (frozenset): 消融測試用，可停用 'structure'/'momentum'/'trend'/'volatility'/'global'/'regime'
+            use_fvg (bool): 啟用 FVG 確認（MSS 須近 fvg_lookback 根內有同向缺口，spec 002）
+            fvg_lookback (int): FVG 回看根數 M (預設 3)
+            disabled_filters (frozenset): 消融測試用，可停用 'structure'/'momentum'/'trend'/'volatility'/'global'/'regime'/'fvg'
             verbose (bool): 是否輸出進度訊息
 
         回傳:
@@ -108,6 +112,10 @@ class BacktestEngine:
         """
         if verbose:
             print("開始進行策略回測...")
+
+        # 消融：'fvg' 在 disabled_filters 時關閉 FVG 確認，該次回測回到 spec 001 基準
+        # （比照 include_regime 的建構期短路模式）
+        effective_use_fvg = use_fvg and ('fvg' not in disabled_filters)
 
         # 1. 預先計算所有技術指標（正典組裝入口：ladder_system.build_indicator_frame）
         temp_df = build_indicator_frame(
@@ -122,7 +130,9 @@ class BacktestEngine:
                 use_adx=use_adx_filter, adx_period=adx_period, adx_threshold=adx_threshold,
                 use_ma=use_ma_filter, ma_period=ma_period,
                 use_er=use_er_filter, er_period=er_period, er_threshold=er_threshold
-            )
+            ),
+            use_fvg=effective_use_fvg,
+            fvg_lookback=fvg_lookback
         )
         # 消融測試停用 regime 時，保持原語意：濾網欄位存在且恆為 True
         if 'regime_ok' not in temp_df.columns:
