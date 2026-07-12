@@ -107,6 +107,72 @@ def test_no_lookahead_bias():
     print("時序偏誤驗證通過：未來的價格變動不影響歷史既成之交易決策。")
 
 
+def test_no_lookahead_bias_with_fvg():
+    """
+    spec 002：FVG 確認開啟（use_fvg=True）時，同樣不得有看前偏誤。
+
+    FVG 偵測用 bar t 與 t-2（皆已收盤）、其「近 M 根存在」以 rolling 回看實作，
+    理論上全因果。此測試以末梢篡改法端到端驗證：篡改第 80 根之後的 OHLC 不得
+    改變篡改點之前的任何交易，證明 FVG 遮罩沒有把未來資料洩回過去。
+    """
+    n_bars = 100
+    df_original = _generate_mock_data(n_bars)
+
+    engine = BacktestEngine(
+        initial_capital=1000000.0,
+        commission_rate=0.001425,
+        tax_rate=0.003,
+        slippage_rate=0.0005,
+        lot_size=1
+    )
+
+    common_kwargs = dict(
+        atr_period=14,
+        k=2.0,
+        ch_period=22,
+        ch_multiplier=3.0,
+        time_limit=15,
+        use_adx_filter=False,
+        use_ma_filter=False,
+        use_fvg=True,
+        fvg_lookback=3
+    )
+
+    res_orig = engine.run_backtest(df_original, **common_kwargs)
+    trades_orig = res_orig["trades"]
+
+    df_modified = df_original.copy()
+    split_idx = 80
+    split_time = df_original.index[split_idx]
+
+    df_modified.iloc[split_idx:, df_modified.columns.get_loc('close')] *= 2.0
+    df_modified.iloc[split_idx:, df_modified.columns.get_loc('open')] *= 2.0
+    df_modified.iloc[split_idx:, df_modified.columns.get_loc('high')] *= 2.0
+    df_modified.iloc[split_idx:, df_modified.columns.get_loc('low')] *= 2.0
+
+    res_mod = engine.run_backtest(df_modified, **common_kwargs)
+    trades_mod = res_mod["trades"]
+
+    assert len(trades_orig) > 0, "FVG 開啟下 mock 數據未產生任何交易，測試失去驗證意義"
+
+    trades_orig_before = trades_orig[trades_orig["datetime"] < split_time]
+    trades_mod_before = trades_mod[trades_mod["datetime"] < split_time]
+
+    assert len(trades_orig_before) == len(trades_mod_before), \
+        "FVG 開啟下未來數據修改影響了歷史交易筆數！FVG 遮罩存在看前偏誤。"
+
+    for i in range(len(trades_orig_before)):
+        t_orig = trades_orig_before.iloc[i]
+        t_mod = trades_mod_before.iloc[i]
+
+        assert t_orig["datetime"] == t_mod["datetime"], f"第 {i} 筆交易的時間戳不一致（FVG）"
+        assert t_orig["action"] == t_mod["action"], f"第 {i} 筆交易的動作不一致（FVG）"
+        assert abs(t_orig["price"] - t_mod["price"]) < 1e-5, f"第 {i} 筆交易的執行價格不一致（FVG）"
+        assert abs(t_orig["shares"] - t_mod["shares"]) < 1e-5, f"第 {i} 筆交易的股數不一致（FVG）"
+
+    print("FVG 時序偏誤驗證通過：FVG 確認未把未來資料洩回歷史決策。")
+
+
 # ---------------------------------------------------------------------------
 # 投資組合回測：晚上市標的之看前偏誤防禦
 # 背景：portfolio_backtester 曾以 .bfill() 對齊多標的時間軸，導致晚上市標的
