@@ -82,6 +82,7 @@ git 出現詭異損毀時第一個懷疑 Drive 同步衝突（找 `*conflicted c
   PR #6 次根開盤成交、PR #7 監控 repaint + 尋優 hold-out 閘門、
   PR #8 Low 級批次含 ExitEvent enum），細節與驗證證據見健檢報告內
   各「✅ 已修復」註記。引擎現為可信基準；下一階段是 specs/002–006
-  的新功能開發（走 Spec Kit 流程；003 內含「做空 vs Long-Only」
-  待使用者決策）。仍待使用者決定：搬離 Google Drive、裁剪 plugin、
+  的新功能開發（走 Spec Kit 流程）。003 已由使用者定案：**產品正式為
+  Long-Only**（決策記錄與重啟條件在 specs/003 檔頭），該規格不進入
+  /speckit-plan。仍待使用者決定：搬離 Google Drive、裁剪 plugin、
   TrendPoint_OpenSpec.md 是否移入 docs/。
