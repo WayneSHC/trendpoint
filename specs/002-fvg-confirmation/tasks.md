@@ -61,8 +61,8 @@
 
 ## Phase 3: Polish & Cross-Cutting
 
-- [ ] T015 依 quickstart.md 全套驗證：三測試檔全綠、`pytest -q` 全綠、`-m "not performance"` 正常、本機 no-numba 重跑（parity 已在清單）一致
-- [ ] T016 [P] 文件同步：`specs/001-ladder-core/spec.md` 修訂摘要表「MSS 必須伴隨 FVG」列由「移出基準」改為指向已實作的 002；`specs/002-fvg-confirmation/spec.md` Status 由 Draft 改為 Implemented
+- [x] T015 依 quickstart.md 全套驗證：三測試檔全綠、`pytest -q` 全綠、`-m "not performance"` 正常、本機 no-numba 重跑（parity 已在清單）一致
+- [x] T016 [P] 文件同步：`specs/001-ladder-core/spec.md` 修訂摘要表「MSS 必須伴隨 FVG」列由「移出基準」改為指向已實作的 002；`specs/002-fvg-confirmation/spec.md` Status 由 Draft 改為 Implemented
 - [ ] T017 開 PR（base: main）：說明含 T012 基準重現對照（CSV sha256 相同）、T013 MSS 計數比較、T014 消融表格、T010/T011 看前偏誤三層防線、憲法檢核聲明；CI 全綠後合併
 
 ---

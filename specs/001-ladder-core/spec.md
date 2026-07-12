@@ -13,7 +13,7 @@
 >
 > | 原 OpenSpec 條款 | 本基準的處理 | 後續規格 |
 > | :--- | :--- | :--- |
-> | MSS 必須伴隨 FVG（公平價值缺口） | 移出基準 — 現行程式未實作 | [002-fvg-confirmation](../002-fvg-confirmation/spec.md) |
+> | MSS 必須伴隨 FVG（公平價值缺口） | 已於 002 實作（`use_fvg`，預設啟用）；訊號層減少假 MSS，但因 MSS⊆BOS 且進場為 mss∨bos，回測 P&L 零影響 | [002-fvg-confirmation](../002-fvg-confirmation/spec.md) |
 > | 空頭階梯 / 做空邏輯 | **已定案 Long-Only（2026-07-11）**，003 已關閉；重啟條件見該規格決策記錄 | [003-short-side](../003-short-side/spec.md) |
 > | 突破上/下關價縮小 k 值激進追價 | 移出基準 — 現行未實作 | [005-extreme-regime](../005-extreme-regime/spec.md) |
 > | 收盤前 15 分鐘強制平倉、量價背離減倉 25%、階段 2 時間止盈 | 移出基準 — 現行僅有階段 1 的 bar-count 時間止盈 | [006-exit-system-completion](../006-exit-system-completion/spec.md) |
@@ -113,6 +113,7 @@
 - 本基準為 **Long-Only**：僅產生與管理多頭部位。此為正式產品範圍決策
   （2026-07-11，非暫時狀態）；空頭市況的系統行為是「三關價濾網擋下做多、
   維持空手」。重啟做空的條件見 spec 003 決策記錄（需先有台指期支援）。
-- MSS 偵測 **不含 FVG 確認**（見 spec 002）。
+- MSS 偵測的 FVG 確認已於 **spec 002 實作**（`use_fvg` 預設啟用）；此 as-built
+  基準文字描述的是 FVG 前行為，實際程式現以 `use_fvg=False` 精確重現本基準。
 - 標的為台股 ETF 與個股（yfinance 數據源）；日線為主，5 分鐘線為輔。
 - 單一使用者、單機／GitHub Actions 排程運行；無多用戶併發需求。
