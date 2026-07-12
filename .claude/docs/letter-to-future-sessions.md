@@ -98,5 +98,8 @@ git 出現詭異損毀時第一個懷疑 Drive 同步衝突（找 `*conflicted c
   守的是「未來資料回洩過去」（bfill/三關價類），拿掉已因果的 shift(1)
   不會被它抓到——那是 test_lookahead_bias.py 的守備範圍，兩者互補。
   下一個開發目標：spec 002（FVG 確認）。剩餘 Draft：002/005/006。
-  重建 trendpoint.db：`scratchpad/build_db.py` 從 data/*_daily.csv 灌，
-  表名 `stock_{ticker}_daily`。
+  重建 trendpoint.db（gitignored）：正規做法 `python run_ingestion.py`
+  （yfinance 下載）；若本地已有 `data/*_daily.csv`（同屬 gitignored、僅存在
+  Wayne 的 Drive repo），可用 `db_security.safe_save_to_sqlite` 逐檔灌入，
+  表名 `stock_{stem}`（stem 為 CSV 去副檔名，如 `0050_TW_daily`）。
+  新測試不依賴 db——全用 `tests/acceptance_fixtures.py` 的合成 K 線，離線可跑。
