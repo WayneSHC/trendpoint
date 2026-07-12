@@ -51,9 +51,9 @@
 - [x] T009 [P] [US1] 新增 `tests/test_fvg_confirmation.py`：(a) `_detect_fvg` 對手工三根缺口 df 的偵測正確（含前 2 根 False）；(b) mss 閘門真值表五種情形（data-model.md §2）；(c) **基準重現**——同一 df 上 `detect_market_structure(use_fvg=False)` 與現行輸出 `assert_series_equal` 零差異；(d) `bos_signal` 在 use_fvg True/False 皆不變。檔頭加 MPL-2.0
 - [x] T010 [US1] `tests/test_lookahead_bias.py` 新增 FVG tail-tamper 案例：`use_fvg=True` 下跑原資料與「split 後 OHLC 加倍」資料，斷言 split 前交易逐筆相同（沿用既有 `_generate_mock_data` 與斷言模式）
 - [x] T011 [US1] `tests/test_acceptance_parity.py` 加 `use_fvg=True` 參數化變體（`_PARAMS` 增加一組），確保 FVG 欄位納入前綴一致性與逐根重播（零容差）
-- [ ] T012 [US1] **基準重現閘門**：設 `use_fvg=False`（或用 `disabled_filters={'fvg'}`）重跑 `run_backtest.py`/`run_portfolio_backtest.py`，六個 trades CSV sha256 與 T001 逐一相同；`pytest -q` 全綠。結果填入 `baseline-pre-fvg.md`
-- [ ] T013 [US1] **SC-001 實跑驗證**：對五標的比較 `use_fvg` True/False 的 MSS 計數，確認每檔下降且 > 0；若某檔歸零則放寬 `config.yaml` 的 `fvg_lookback` 並記錄。數字寫入 `baseline-pre-fvg.md` 與 PR
-- [ ] T014 [US1] **SC-002 消融報告**：跑 `python run_ablation.py`，確認輸出含「停用 FVG 確認」列與其對報酬/筆數/EV 的 delta；擷取表格入 PR
+- [x] T012 [US1] **基準重現閘門**：設 `use_fvg=False`（或用 `disabled_filters={'fvg'}`）重跑 `run_backtest.py`/`run_portfolio_backtest.py`，六個 trades CSV sha256 與 T001 逐一相同；`pytest -q` 全綠。結果填入 `baseline-pre-fvg.md`
+- [x] T013 [US1] **SC-001 實跑驗證**：對五標的比較 `use_fvg` True/False 的 MSS 計數，確認每檔下降且 > 0；若某檔歸零則放寬 `config.yaml` 的 `fvg_lookback` 並記錄。數字寫入 `baseline-pre-fvg.md` 與 PR
+- [x] T014 [US1] **SC-002 消融報告**：跑 `python run_ablation.py`，確認輸出含「停用 FVG 確認」列與其對報酬/筆數/EV 的 delta；擷取表格入 PR
 
 **Checkpoint**: US1 完整——SC-001/002/003 全數有證據
 
