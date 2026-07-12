@@ -17,7 +17,7 @@
 > | 空頭階梯 / 做空邏輯 | **已定案 Long-Only（2026-07-11）**，003 已關閉；重啟條件見該規格決策記錄 | [003-short-side](../003-short-side/spec.md) |
 > | 突破上/下關價縮小 k 值激進追價 | 移出基準 — 現行未實作 | [005-extreme-regime](../005-extreme-regime/spec.md) |
 > | 收盤前 15 分鐘強制平倉、量價背離減倉 25%、階段 2 時間止盈 | 移出基準 — 現行僅有階段 1 的 bar-count 時間止盈 | [006-exit-system-completion](../006-exit-system-completion/spec.md) |
-> | §6 驗收標準（延遲 100ms、回測即時一致性、插補、離群值） | 保留為基準需求，但目前無自動化測試 | [004-acceptance-tests](../004-acceptance-tests/spec.md) |
+> | §6 驗收標準（延遲 100ms、回測即時一致性、插補、離群值） | **已落為自動化測試（2026-07-12）** | [004-acceptance-tests](../004-acceptance-tests/spec.md) |
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -104,9 +104,9 @@
 
 - **SC-001**: 首位使用者使用後能清楚說出當前交易方向（看多/看空/觀望）。`[MANUAL]`
 - **SC-002**: 介面顯示具體高低參考價（三關價、階梯價數值），無模糊預測語句。`[MANUAL]`
-- **SC-003**: 歷史回測計算之階梯線與即時計算之階梯線完全吻合，誤差為 0。（自動化 → spec 004）
-- **SC-004**: 新一根分鐘級 K 線到達後，演算法模組計算時間 < 100ms。（自動化 → spec 004）
-- **SC-005**: 缺漏 K 線經插補後，後續指標時序正確；極端異常值被過濾並產生警告。（自動化 → spec 004）
+- **SC-003**: 歷史回測計算之階梯線與即時計算之階梯線完全吻合，誤差為 0。（自動化：`tests/test_acceptance_parity.py`，spec 004 US1）
+- **SC-004**: 新一根分鐘級 K 線到達後，演算法模組計算時間 < 100ms。（自動化：`tests/test_acceptance_latency.py`，spec 004 US2）
+- **SC-005**: 缺漏 K 線經插補後，後續指標時序正確；極端異常值被過濾並產生警告。（自動化：`tests/test_acceptance_data_quality.py`，spec 004 US3）
 
 ## Assumptions
 

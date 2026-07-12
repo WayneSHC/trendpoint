@@ -4,7 +4,7 @@
 
 **Created**: 2026-07-07
 
-**Status**: Draft
+**Status**: Implemented（2026-07-12）— 三個 US 全數落為 pytest 測試並通過（詳見 tasks.md、plan.md）
 
 **Input**: 原 OpenSpec §6 定義了可量測的驗收標準（100ms 延遲、回測即時零誤差、
 插補容錯、離群值過濾），但無任何對應的自動化測試。依憲法原則 III
