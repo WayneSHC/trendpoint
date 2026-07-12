@@ -24,7 +24,7 @@
 
 **Purpose**: 取 FVG 前基準（迴歸閘門錨點）與新增組態參數。**基準必須在任何引擎改碼前落檔並 push**（session/scratchpad 不耐久教訓）。
 
-- [ ] T001 取 FVG 前基準：跑 `python run_backtest.py` 與 `python run_portfolio_backtest.py`，記錄五標的報酬/筆數/勝率、組合 8.22%/34、六個 `data/*_backtest_trades.csv` 的 sha256 至 `specs/002-fvg-confirmation/baseline-pre-fvg.md`。**完成即 commit + push**
+- [x] T001 取 FVG 前基準：跑 `python run_backtest.py` 與 `python run_portfolio_backtest.py`，記錄五標的報酬/筆數/勝率、組合 8.22%/34、六個 `data/*_backtest_trades.csv` 的 sha256 至 `specs/002-fvg-confirmation/baseline-pre-fvg.md`。**完成即 commit + push**
 - [ ] T002 [P] 組態：`config/config.py` 的 `SingleStrategyParams` 新增 `use_fvg: bool = Field(default=True, ...)` 與 `fvg_lookback: int = Field(default=3, ge=1, ...)`；`config/config.yaml` 的 `strategy.default` 加 `use_fvg: true` / `fvg_lookback: 3`；若 `tests/test_config.py` 有 schema 覆蓋則同步
 
 ---
