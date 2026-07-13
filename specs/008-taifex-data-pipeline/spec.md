@@ -10,7 +10,7 @@
 
 ## 這是三段拆解的第一段
 
-台指期完整支援拆為依序三個規格：**008a 資料層（本規格）→ 008b 期貨成本/口數 → spec 003 做空交易邏輯**。本規格刻意只碰資料層、不碰回測引擎；引擎穿 `Instrument` 與成本 dispatch 順延到 008b。
+台指期完整支援拆為依序三個規格：**008a 資料層（本規格）→ 008b 期貨成本/口數 → spec 003 做空交易邏輯**。本規格聚焦資料層；回測引擎除**一道最小 fail-fast 護欄**外不碰（`Instrument` 穿線與成本/sizing dispatch 順延到 008b）。
 
 ## Clarifications
 
@@ -20,6 +20,7 @@
 - Q: 資料來源怎麼定？ → A: 先設抽象層、來源後補；現在用 Csv/Mock adapter 跑通端到端，不碰真 TAIFEX/券商。
 - Q: Rollover 責任歸誰？ → A: 各 adapter 自理拼接、交付連續序列；框架保持資產類別無關。
 - Q: 抽象層多深入 + 008a 範圍？ → A: 完整資料層重構（Instrument 取代裸字串），但**範圍限資料層**：引擎不碰、順延 008b；對 futures 回測 fail-fast。
+- Q: 期貨回測 fail-fast 護欄放哪層？ → A: 入口 + 引擎雙保險——回測入口腳本層 + 引擎方法內一道「僅拒絕、不做成本 dispatch」的 asset_class 護欄。008a 因此對引擎有**最小觸碰**（僅護欄；成本/sizing 仍 008b）。
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -90,7 +91,7 @@
 - **FR-004**: adapter 交付的序列 MUST 符合既有資料契約（標準 OHLCV 欄位 + `datetime` 索引、時序遞增、無負價、量≥0），且維持因果（沿用 ffill-only、不得 bfill）。
 - **FR-005**: 表命名 MUST 集中於單一 helper；既有 ~7 處散落的表名導出 MUST 改用之；equity MUST 維持 `stock_*` 命名，futures 用獨立命名空間；表名白名單 regex MUST 同時接受兩者。
 - **FR-006**: 資料驗證的離群跳動門檻 MUST 可依資產類別校準；equity MUST 維持現值。
-- **FR-007**: 系統 MUST 在對 futures instrument 呼叫回測入口時 fail-fast，回報明確錯誤，MUST NOT 以股票型成本產出績效數字。
+- **FR-007**: 系統 MUST 對 futures instrument 的回測**雙層 fail-fast**：(a) 回測入口腳本（`run_backtest` / `run_portfolio_backtest`）於 dispatch 前檢查；(b) 回測引擎方法內一道最小 `asset_class` 護欄（僅拒絕、不做成本/sizing dispatch）。兩層皆 MUST 回報明確錯誤，且 MUST NOT 以股票型成本產出績效數字。
 - **FR-008**: registry 與新參數 MUST 集中於 config + schema 驗證，MUST NOT 硬編碼。
 - **FR-009**: 本規格的資料層改動 MUST NOT 改變任何既有 equity 回測數字；合併前 `pytest` 全綠（含 parity）並附回歸對照。
 - **FR-010**: 系統 MUST 有端到端測試涵蓋一個 futures mock instrument（含 rollover 跳空）之 ingest→驗證→存→載。
@@ -126,7 +127,7 @@
 - 期貨成本模型（期交稅、保證金、每口手續費、雙邊課稅）→ 008b。
 - 口數 sizing（口 × 點值、保證金約束）→ 008b。
 - 做空（`PositionManager` `direction=-1`、空方吊燈與進場）→ spec 003。
-- 回測引擎（backtester / portfolio）穿 `Instrument` 與成本 dispatch → 008b。
+- 回測引擎（backtester / portfolio）穿 `Instrument` 與成本/sizing dispatch → 008b。（**例外**：008a 於引擎加一道最小 `asset_class` fail-fast 護欄，僅拒絕期貨、不做任何成本邏輯。）
 - 真實 TAIFEX/券商 adapter（Shioaji 等）→ 日後。
 - 框架內建 rollover 引擎 → 不做（adapter 自理）。
 - 對期貨做實際可交易回測 → 待 008b + 003（008a 只驗資料進出）。
