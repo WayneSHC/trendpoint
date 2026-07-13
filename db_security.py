@@ -14,8 +14,9 @@ import re
 import sqlite3
 import pandas as pd
 
-# 嚴格的資料表名稱白名單正則表達式，僅允許符合 stock_代號_daily 或 stock_代號_5m 格式
-TABLE_NAME_PATTERN = re.compile(r"^stock_[a-zA-Z0-9_]+_(daily|5m)$")
+# 嚴格的資料表名稱白名單正則表達式。
+# spec 008a：放寬命名空間以支援期貨（fut_*）；equity 維持 stock_* 逐字元不變。
+TABLE_NAME_PATTERN = re.compile(r"^(stock|fut)_[a-zA-Z0-9_]+_(daily|5m)$")
 
 def validate_table_name(table_name: str) -> None:
     """
@@ -24,8 +25,25 @@ def validate_table_name(table_name: str) -> None:
     if not TABLE_NAME_PATTERN.match(table_name):
         raise ValueError(
             f"資料庫安全性錯誤：拒絕存取不合規的資料表名稱 '{table_name}'。"
-            f"資料表名稱必須完全符合 'stock_<ticker>_<interval>' 格式且不含特殊字元。"
+            f"資料表名稱必須完全符合 '(stock|fut)_<代號>_<interval>' 格式且不含特殊字元。"
         )
+
+def _clean_id(instrument_id: str) -> str:
+    """識別碼轉為安全表名片段（與現行 run_ingestion 一致）。"""
+    return instrument_id.replace(".", "_").replace("/", "_")
+
+def table_name_for(instrument, timeframe: str) -> str:
+    """
+    由 Instrument + 時框導出 SQLite 表名，作為**唯一導出點**（spec 008a）。
+    equity → `stock_{clean_id}_{tf}`（與現行逐字元相同，不需重抓）；
+    futures → `fut_{clean_id}_{tf}`。導出後即過白名單驗證，fail-fast。
+    """
+    # duck-typed：AssetClass(str, Enum) 之成員 == "futures"，故直接比較字串即可
+    is_futures = getattr(instrument, "asset_class", "equity") == "futures"
+    prefix = "fut" if is_futures else "stock"
+    name = f"{prefix}_{_clean_id(instrument.id)}_{timeframe}"
+    validate_table_name(name)
+    return name
 
 def safe_load_db_data(db_path: str, table_name: str) -> pd.DataFrame:
     """

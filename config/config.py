@@ -15,6 +15,8 @@ import yaml
 from typing import List, Dict
 from pydantic import BaseModel, Field, ValidationError
 
+from instruments import Instrument  # spec 008a：資產類別抽象
+
 class DataConfig(BaseModel):
     """
     資料來源與存儲設定
@@ -25,7 +27,11 @@ class DataConfig(BaseModel):
     )
     tickers: List[str] = Field(
         default_factory=lambda: ["2330.TW", "0050.TW"],
-        description="系統支援追蹤的證券/標代號清單"
+        description="系統支援追蹤的證券/標代號清單（純字串→equity/yfinance instrument）"
+    )
+    instruments: List[Instrument] = Field(
+        default_factory=list,
+        description="結構化 instrument 宣告（期貨/明確資產類別，spec 008a）；與 tickers 合併為 registry"
     )
 
 class BacktestConfig(BaseModel):
@@ -188,6 +194,14 @@ class DataQualityConfig(BaseModel):
         description="相鄰收盤跳動比率上限（|pct_change|）；超過即判資料離群並拒絕整批。"
                     "台股現貨有 10% 漲跌幅限制，預設 3.0（±300%）僅攔截歸零／千倍級的資料錯誤。"
     )
+    max_close_jump_ratio_by_asset: Dict[str, float] = Field(
+        default_factory=dict,
+        description="per-asset-class 離群跳動門檻覆寫（如 {'futures': 5.0}）；未列則用 max_close_jump_ratio（spec 008a）"
+    )
+
+    def jump_ratio_for(self, asset_class) -> float:
+        """依資產類別取離群門檻；AssetClass(str,Enum) 成員 == 其字串值，dict.get 兩者皆可。"""
+        return self.max_close_jump_ratio_by_asset.get(asset_class, self.max_close_jump_ratio)
 
 class SystemConfig(BaseModel):
     """
