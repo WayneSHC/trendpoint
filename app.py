@@ -25,7 +25,8 @@ import streamlit as st
 from backtester import BacktestEngine
 from data_ingestion import fetch_stock_data
 from config import load_config
-from db_security import safe_load_db_data, safe_save_to_sqlite
+from db_security import safe_load_db_data, safe_save_to_sqlite, table_name_for
+from instruments import equity_instrument
 from security_utils import is_locked, register_failed_attempt, reset_lockout
 from performance import rolling_sharpe
 from monte_carlo import bootstrap_trades
@@ -326,9 +327,8 @@ with st.sidebar.expander("管理觀察標的"):
                     df_verify_5m = fetch_stock_data(ticker=new_ticker, period="5d", interval="5m")
 
                 if df_verify is not None and not df_verify.empty and df_verify_5m is not None and not df_verify_5m.empty:
-                    clean_new = new_ticker.replace(".", "_")
-                    daily_ok = safe_save_to_sqlite(df_verify, f"stock_{clean_new}_daily", db_path_tmp)
-                    m5_ok = safe_save_to_sqlite(df_verify_5m, f"stock_{clean_new}_5m", db_path_tmp)
+                    daily_ok = safe_save_to_sqlite(df_verify, table_name_for(equity_instrument(new_ticker), "daily"), db_path_tmp)
+                    m5_ok = safe_save_to_sqlite(df_verify_5m, table_name_for(equity_instrument(new_ticker), "5m"), db_path_tmp)
 
                     if daily_ok and m5_ok:
                         from config.config import save_config, SingleStrategyParams
@@ -352,12 +352,11 @@ with st.sidebar.expander("管理觀察標的"):
     if st.button("確認刪除", disabled=not can_delete):
         db_path_tmp = cfg.data.database_path
         with st.spinner(f"正在移除 {ticker_to_delete} 並清理資料庫……"):
-            clean_del = ticker_to_delete.replace(".", "_")
             from db_security import validate_table_name
             import sqlite3
 
-            table_daily_del = f"stock_{clean_del}_daily"
-            table_5m_del = f"stock_{clean_del}_5m"
+            table_daily_del = table_name_for(equity_instrument(ticker_to_delete), "daily")
+            table_5m_del = table_name_for(equity_instrument(ticker_to_delete), "5m")
             validate_table_name(table_daily_del)
             validate_table_name(table_5m_del)
 
@@ -402,8 +401,7 @@ if is_portfolio:
         df_trades = results["trades"]
     data_stamp = str(df_equity.index[-1].date()) if len(df_equity) else "N/A"
 else:
-    clean_ticker = ticker_option.replace(".", "_")
-    table_name = f"stock_{clean_ticker}_daily"
+    table_name = table_name_for(equity_instrument(ticker_option), "daily")
 
     # 抓取 10 年還原股價日線（快取 15 分鐘）；失敗時回退本地資料庫
     with st.spinner(f"正在更新 {ticker_option} 數據……"):
@@ -637,8 +635,7 @@ with tab_price:
         try:
             normalized_dfs = []
             for t in cfg.data.tickers:
-                clean_t = t.replace(".", "_")
-                df_t = safe_load_db_data(db_path, f"stock_{clean_t}_daily")
+                df_t = safe_load_db_data(db_path, table_name_for(equity_instrument(t), "daily"))
                 if not df_t.empty:
                     df_t[t] = (df_t['close'] / df_t['close'].iloc[0]) * 100.0
                     normalized_dfs.append(df_t[[t]])

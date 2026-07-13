@@ -15,6 +15,8 @@ TrendPoint - 投資組合回測執行腳本 (Run Portfolio Backtest)
 import os
 import sys
 from portfolio_backtester import PortfolioBacktester
+from instruments import InstrumentRegistry, equity_instrument
+from backtester import assert_backtestable
 
 def display_summary(summary: dict):
     """
@@ -39,6 +41,14 @@ def run():
     
     try:
         backtester = PortfolioBacktester()
+        # spec 008a 護欄（入口層）：dispatch 前拒絕含期貨的組合
+        _reg = InstrumentRegistry.from_config(backtester.cfg.data.tickers, backtester.cfg.data.instruments)
+        for _tk in backtester.tickers:
+            try:
+                _inst = _reg.resolve(_tk)
+            except KeyError:
+                _inst = equity_instrument(_tk)
+            assert_backtestable(_inst.asset_class)
         res = backtester.run_portfolio_backtest()
         
         summary = res["summary"]

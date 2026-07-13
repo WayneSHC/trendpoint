@@ -21,7 +21,9 @@ import numpy as np
 from typing import Dict, Any, List, Tuple
 
 from config import load_config
-from db_security import safe_load_db_data
+from db_security import safe_load_db_data, table_name_for
+from instruments import equity_instrument, InstrumentRegistry
+from backtester import assert_backtestable
 from ladder_system import (
     calculate_tr,
     calculate_atr,
@@ -72,8 +74,7 @@ class PortfolioBacktester:
         ticker_dfs = {}
         
         for ticker in self.tickers:
-            clean_ticker = ticker.replace(".", "_")
-            table_name = f"stock_{clean_ticker}_daily"
+            table_name = table_name_for(equity_instrument(ticker), "daily")
             
             df = safe_load_db_data(db_path, table_name)
             
@@ -208,6 +209,16 @@ class PortfolioBacktester:
         執行多標的投資組合對齊回測
         """
         print("開始執行多標的投資組合聯合理財回測...")
+
+        # spec 008a 護欄（引擎層）：組合若含期貨 instrument 則拒絕（僅拒絕，不做成本/sizing）
+        _reg = InstrumentRegistry.from_config(self.cfg.data.tickers, self.cfg.data.instruments)
+        for _tk in self.tickers:
+            try:
+                _inst = _reg.resolve(_tk)
+            except KeyError:
+                _inst = equity_instrument(_tk)  # 測試手工 frame 之標的視為 equity
+            assert_backtestable(_inst.asset_class)
+
         ticker_dfs = self._load_and_calculate_indicators()
         
         if not ticker_dfs:
