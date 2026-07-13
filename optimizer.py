@@ -20,7 +20,8 @@ from typing import Tuple, Dict, Any
 
 from config import load_config
 from backtester import BacktestEngine
-from db_security import safe_load_db_data
+from db_security import safe_load_db_data, table_name_for
+from instruments import equity_instrument
 
 class ParameterOptimizer:
     """
@@ -38,8 +39,7 @@ class ParameterOptimizer:
         從 SQLite 載入該標的的日線數據
         """
         db_path = self.cfg.data.database_path
-        clean_ticker = ticker.replace(".", "_")
-        table_name = f"stock_{clean_ticker}_daily"
+        table_name = table_name_for(equity_instrument(ticker), "daily")
         
         if not os.path.exists(db_path):
             raise FileNotFoundError(f"資料庫檔案不存在: {db_path}")

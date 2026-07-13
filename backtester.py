@@ -23,6 +23,20 @@ from ladder_system import (
 )
 from performance import compute_performance_metrics
 
+
+class FuturesBacktestNotSupportedError(ValueError):
+    """對期貨 instrument 呼叫回測——008a 資料層尚不支援（需 008b 成本/口數模型）。"""
+
+
+def assert_backtestable(asset_class="equity") -> None:
+    """spec 008a 護欄：拒絕對期貨 instrument 回測（僅拒絕，不做任何成本/sizing）。"""
+    ac = getattr(asset_class, "value", asset_class)
+    if ac == "futures":
+        raise FuturesBacktestNotSupportedError(
+            "期貨回測需 008b 成本/口數模型；008a 資料層尚不支援對期貨回測。"
+        )
+
+
 class BacktestEngine:
     """
     歷史回測引擎類別，模擬策略執行並計算績效指標。
@@ -82,6 +96,7 @@ class BacktestEngine:
                      er_threshold: float = 0.3,
                      use_fvg: bool = False,
                      fvg_lookback: int = 3,
+                     asset_class: str = "equity",
                      disabled_filters: frozenset = frozenset(),
                      verbose: bool = True) -> Dict[str, Any]:
         """
@@ -110,6 +125,9 @@ class BacktestEngine:
         回傳:
             Dict: 包含績效指標摘要 (summary)、淨值曲線 (equity_curve) 與交易日誌 (trades)
         """
+        # spec 008a 護欄（引擎層）：拒絕對期貨回測（僅拒絕，不做成本/sizing）
+        assert_backtestable(asset_class)
+
         if verbose:
             print("開始進行策略回測...")
 
