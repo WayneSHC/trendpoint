@@ -176,9 +176,13 @@ def _confirmed_and_prev(val_series: pd.Series, n: int) -> Tuple[pd.Series, pd.Se
     與其前一個已確認樞紐值(prev)。確認延遲 = n 根（樞紐 i 於 i+n 方可用）。全向量化。
     """
     confirmed = val_series.shift(n)                 # 樞紐值於 i+n 現身（已確認時點）
-    events = confirmed.dropna()
+    # 以位置（非標籤）指派 prev，對重複索引亦穩健：
+    mask = confirmed.notna().to_numpy()
+    ev_vals = confirmed.to_numpy()[mask]            # 依序排列的已確認樞紐值
+    prev_vals = np.full(ev_vals.shape, np.nan)
+    prev_vals[1:] = ev_vals[:-1]                    # 前一個已確認樞紐值（首個為 NaN）
     prev = pd.Series(np.nan, index=val_series.index)
-    prev.loc[events.index] = events.shift(1).values
+    prev.iloc[mask] = prev_vals
     return confirmed.ffill(), prev.ffill()
 
 
