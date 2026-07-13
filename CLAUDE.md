@@ -52,10 +52,11 @@ python monitor_signals.py --once   # 單次訊號檢測與推播
   `db_security.table_name_for`（equity→`stock_*`、futures→`fut_*`）；`data/*.csv` 為快取
 - 通知：`monitor_signals.py` + `alerts.py`（LINE Messaging API / Telegram，無憑證時 Mock）
 - UI：`app.py`（Streamlit，禁止內嵌演算法邏輯）
-- 規格：`specs/001` 為 as-built 基準；`002` 已併入 main；`007`（MSS fractal 反轉，
-  另分支/PR）；`008a`（台指期資料層抽象）長側資料管線已實作；`003`（短側）重開為
-  台指期限定、待 008b（成本/口數）；`004~006` 見各 spec.md。
-  新功能走 Spec Kit：`/speckit-specify` → `/speckit-plan` → `/speckit-tasks` → `/speckit-implement`
+- 規格：`specs/001` 為 as-built 基準；`002`（FVG 確認）已併入 main；
+  `007`（MSS fractal 反轉進場）長側已實作並併入 main（US1–US3，SC-003 未達成如實記錄），短側待 003；
+  `008a`（台指期資料層抽象）已併入 main；`003`（短側）2026-07-12 重開為**台指期限定**、
+  待 008b（成本/口數）；`004~006` 見各 spec.md 狀態。新功能走 Spec Kit：
+  `/speckit-specify` → `/speckit-plan` → `/speckit-tasks` → `/speckit-implement`
 - 理論：`three_bands_theory.md`、`docs/ladder-optimization-research.md`（階梯優化研究，
   原 docx 之正式版）；歷史文件：`TrendPoint_OpenSpec.md`（勿當現行規格）
 

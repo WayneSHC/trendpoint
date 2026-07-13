@@ -27,6 +27,11 @@ strategy:
     time_limit: 15
     use_fvg: true
     fvg_lookback: 3
+    # spec 007：MSS fractal 反轉（ticker_overrides 亦可覆寫下列鍵）
+    swing_fractal_n: 2
+    mss_reversal_entry: true
+    mss_ladder_k: null
+    mss_volume_mult: 1.5
   ticker_overrides:
     0050.TW:
       atr_period: 10

@@ -94,7 +94,9 @@ class PortfolioBacktester:
             # 此處仍為內聯組裝，未走 build_indicator_frame——待 portfolio 一併重構時另議）
             mss, bos = detect_market_structure(temp_df, period=10,
                                                use_fvg=params.use_fvg,
-                                               fvg_lookback=params.fvg_lookback)
+                                               fvg_lookback=params.fvg_lookback,
+                                               swing_n=params.swing_fractal_n,
+                                               volume_mult=params.mss_volume_mult)
             temp_df['mss_signal'] = mss
             temp_df['bos_signal'] = bos
             temp_df['ladder'] = calculate_ladder_levels(temp_df, temp_df['atr'], k=params.ladder_k)
@@ -145,6 +147,7 @@ class PortfolioBacktester:
 
             # 儲存策略參數供回測迴圈讀取
             temp_df['param_time_limit'] = params.time_limit
+            temp_df['param_mss_reversal_entry'] = bool(params.mss_reversal_entry)
 
             ticker_dfs[ticker] = temp_df
 
@@ -363,26 +366,33 @@ class PortfolioBacktester:
                     # 全域濾網：三關價 + 市況濾網 (ADX/長均線/ER)
                     global_ok = (sig_row['close'] > sig_row['mid_price']) and bool(sig_row['regime_ok'])
 
-                    # 結構突破確認
-                    struct_sig = 0
+                    # 結構訊號分流（spec 007）：BOS 續勢 vs MSS 反轉（mirror 單標的路徑）。
+                    # param_mss_reversal_entry=False 時僅走 BOS 續勢＝復現 007 前行為。
+                    mss_rev_on = bool(sig_row.get('param_mss_reversal_entry', False))
+                    is_entry = False
                     if struct_row is not None:
-                        if struct_row['mss_signal'] == 1 or struct_row['bos_signal'] == 1:
-                            struct_sig = 1
-                        elif struct_row['mss_signal'] == -1 or struct_row['bos_signal'] == -1:
-                            struct_sig = -1
-
-                    is_entry = pm.check_entry_signal(
-                        close=sig_row['close'],
-                        open_val=sig_row['open'],
-                        daily_open=sig_row['daily_open'],
-                        vwap=sig_row['vwap'],
-                        atr=sig_row['atr'],
-                        candle_high=sig_row['high'],
-                        candle_low=sig_row['low'],
-                        structure_sig=struct_sig,
-                        global_filter_ok=global_ok,
-                        is_daily=True # 組合回測目前為日線級別
-                    )
+                        bos_sig = int(struct_row['bos_signal'])
+                        mss_sig = int(struct_row['mss_signal'])
+                        common = dict(
+                            close=sig_row['close'], open_val=sig_row['open'],
+                            daily_open=sig_row['daily_open'], vwap=sig_row['vwap'],
+                            atr=sig_row['atr'], candle_high=sig_row['high'],
+                            candle_low=sig_row['low'], global_filter_ok=global_ok,
+                            is_daily=True,  # 組合回測目前為日線級別
+                        )
+                        # (1) BOS 續勢進場：全維度濾網（語意同 007 前）
+                        if bos_sig == 1:
+                            is_entry = pm.check_entry_signal(structure_sig=1, **common)
+                        # (2) MSS 反轉進場（長側）：放寬 trend + 200MA regime，但保留三關價
+                        #     （close>mid_price；research D6 修訂——global 濾網只留三關價）
+                        if (not is_entry) and mss_rev_on and mss_sig == 1:
+                            rev_common = {**common, 'global_filter_ok': bool(sig_row['close'] > sig_row['mid_price'])}
+                            is_entry = pm.check_entry_signal(
+                                structure_sig=1,
+                                disabled_filters=frozenset({'trend'}),
+                                **rev_common
+                            )
+                        # 看跌反轉（mss_sig == -1）為短側做空 → BLOCKED-003（long-only 暫不支援）
                     
                     if is_entry:
                         signals_to_buy.append(t)

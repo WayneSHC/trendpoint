@@ -16,6 +16,7 @@ import pytest
 import numpy as np
 import pandas as pd
 from backtester import BacktestEngine
+from ladder_system import detect_market_structure
 
 def _generate_mock_data(n_bars: int = 100) -> pd.DataFrame:
     """
@@ -198,8 +199,10 @@ def _make_portfolio_frame(dates: pd.DatetimeIndex) -> pd.DataFrame:
         "daily_open": np.full(n, 100.0),
         "mid_price": np.full(n, 50.0),
         "regime_ok": np.full(n, True),
-        "mss_signal": np.full(n, 1),
-        "bos_signal": np.full(n, 0),
+        # spec 007：進場分流後，通用進場觸發改用 BOS 續勢（本測試驗證成交時序，
+        # 與 MSS 反轉語意無關）。struct_sig=1 路徑與濾網與原本一致。
+        "mss_signal": np.full(n, 0),
+        "bos_signal": np.full(n, 1),
         "chandelier_long": np.full(n, 90.0),
         "realized_vol": np.full(n, 0.2),
         "param_time_limit": np.full(n, 10),
@@ -337,3 +340,51 @@ def test_portfolio_fills_use_next_bar_open():
     assert (abs(buys["price"] - expected) < 1e-9).all(), (
         "買入成交價不是次根開盤價——若接近 110（訊號根收盤）即為當根收盤成交偏誤"
     )
+
+
+# ===========================================================================
+# spec 007 — MSS fractal 反轉訊號的看前偏誤防禦（碎形確認延遲 N 根）
+# ===========================================================================
+
+def _ohlcv_seq(highs, lows, closes, volumes):
+    idx = pd.date_range("2026-02-02 09:00:00", periods=len(highs), freq="1min")
+    return pd.DataFrame(
+        {"open": closes, "high": highs, "low": lows, "close": closes, "volume": volumes},
+        index=idx,
+    )
+
+
+def _uptrend_then_breakdown():
+    highs = [11, 14, 13, 16, 15, 18, 17, 20, 19, 17]
+    lows = [10, 13, 12, 15, 14, 17, 16, 19, 18, 13]
+    closes = [10.5, 13.5, 12.5, 15.5, 14.5, 17.5, 16.5, 19.5, 18.5, 14.0]
+    vols = [1000] * 9 + [3000]
+    return _ohlcv_seq(highs, lows, closes, vols)
+
+
+def test_mss_fractal_prefix_consistency():
+    """對任一截斷點 t，前綴計算的 mss[t] 必與全量計算的 mss[t] 相等
+    （mss 僅依賴 <= t 的資料；碎形樞紐經 shift(n) 確認延遲，故不偷看未來）。"""
+    from acceptance_fixtures import make_klines
+    df = make_klines(300, freq="5min")
+    full_mss, _ = detect_market_structure(df, period=10, swing_n=2, volume_mult=1.5)
+    for t in (30, 60, 90, 150, 210, 270, len(df) - 1):
+        pre_mss, _ = detect_market_structure(df.iloc[: t + 1], period=10, swing_n=2, volume_mult=1.5)
+        assert pre_mss.iloc[t] == full_mss.iloc[t], f"bar {t} 的 MSS 隨未來資料改變——看前偏誤"
+
+
+def test_mss_future_bars_do_not_leak_into_signal():
+    """反轉 MSS 觸發根（bar 9）的訊號，不因其後追加未來 K 線而改變。"""
+    df = _uptrend_then_breakdown()
+    mss_now, _ = detect_market_structure(df, period=5, swing_n=1, volume_mult=1.5)
+    assert mss_now.iloc[9] == -1  # 前提：bar9 為看跌反轉
+
+    # 以單一連續索引追加 2 根「未來」K 線（含會使 bar9 事後成為樞紐的走勢），
+    # bar9 當下的訊號必須不變（連續遞增索引，貼合實際時序契約）。
+    highs = [11, 14, 13, 16, 15, 18, 17, 20, 19, 17, 25, 8]
+    lows = [10, 13, 12, 15, 14, 17, 16, 19, 18, 13, 7, 4]
+    closes = [10.5, 13.5, 12.5, 15.5, 14.5, 17.5, 16.5, 19.5, 18.5, 14.0, 24, 5]
+    vols = [1000] * 9 + [3000, 5000, 5000]
+    extended = _ohlcv_seq(highs, lows, closes, vols)
+    mss_ext, _ = detect_market_structure(extended, period=5, swing_n=1, volume_mult=1.5)
+    assert mss_ext.iloc[9] == mss_now.iloc[9], "bar9 的 MSS 因未來 K 線而改變——看前偏誤"
