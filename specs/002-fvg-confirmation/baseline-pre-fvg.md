@@ -76,6 +76,11 @@ f8f624f340b4981819eb4d1f8533a40599ad6784bb8558bcb42f5734c220cfd1  data/2330_TW_b
 
 **SC-002 的經驗答案：FVG 對回測 EV 的貢獻為 0（零 delta）。** 數字即交付（quickstart「正負皆可」）。
 
+> **後續（spec 007，2026-07-12）**：下述「結構性根因（mss ⊆ bos）」已由 spec 007 解除——
+> MSS 校正為 fractal 反轉訊號並取得獨立進場，現已能影響回測 P&L（007 SC-002 非零 delta）。
+> 惟 FVG 的**邊際** P&L 價值在現有資料上仍約為 0（反轉進場稀疏且恰皆伴隨 FVG）——
+> 見 `specs/007-mss-entry-distinction/baseline-pre-mss.md` US3 段。
+
 ### 為何為零——關鍵結構發現（mss ⊆ bos）
 
 `detect_market_structure` 中 `bull_mss = bull_bos & strong_volume`、
