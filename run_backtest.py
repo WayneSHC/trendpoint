@@ -104,7 +104,10 @@ def run():
                 er_period=params.er_period,
                 er_threshold=params.er_threshold,
                 use_fvg=params.use_fvg,
-                fvg_lookback=params.fvg_lookback
+                fvg_lookback=params.fvg_lookback,
+                swing_n=params.swing_fractal_n,
+                volume_mult=params.mss_volume_mult,
+                mss_reversal_entry=params.mss_reversal_entry
             )
             
             summary = results["summary"]

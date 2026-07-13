@@ -82,6 +82,9 @@ class BacktestEngine:
                      er_threshold: float = 0.3,
                      use_fvg: bool = False,
                      fvg_lookback: int = 3,
+                     swing_n: int = 2,
+                     volume_mult: float = 1.5,
+                     mss_reversal_entry: bool = False,
                      disabled_filters: frozenset = frozenset(),
                      verbose: bool = True) -> Dict[str, Any]:
         """
@@ -132,7 +135,9 @@ class BacktestEngine:
                 use_er=use_er_filter, er_period=er_period, er_threshold=er_threshold
             ),
             use_fvg=effective_use_fvg,
-            fvg_lookback=fvg_lookback
+            fvg_lookback=fvg_lookback,
+            swing_n=swing_n,
+            volume_mult=volume_mult
         )
         # 消融測試停用 regime 時，保持原語意：濾網欄位存在且恆為 True
         if 'regime_ok' not in temp_df.columns:
@@ -170,27 +175,36 @@ class BacktestEngine:
                 # 全域濾網：三關價（價格在中關價之上做多）+ 市況濾網 (ADX/長均線/ER)
                 global_ok = (sig_row['close'] > sig_row['mid_price']) and bool(sig_row['regime_ok'])
 
-                # 結構訊號合併 (BOS 或 MSS 均可做為結構確認)
-                struct_sig = 0
+                # 結構訊號分流（spec 007）：BOS 續勢 vs MSS 反轉，兩條獨立進場路徑。
+                # mss_reversal_entry=False 時僅走 BOS 續勢——因 007 前 MSS 為 BOS 子集，
+                # 此設定恰精確復現 007 前的進場行為（回歸/消融錨點，見 tasks T019）。
+                is_entry = False
+                entry_reason = "滿足多重確認進場做多"
                 if struct_row is not None:
-                    if struct_row['mss_signal'] == 1 or struct_row['bos_signal'] == 1:
-                        struct_sig = 1
-                    elif struct_row['mss_signal'] == -1 or struct_row['bos_signal'] == -1:
-                        struct_sig = -1
-
-                is_entry = pm.check_entry_signal(
-                    close=sig_row['close'],
-                    open_val=sig_row['open'],
-                    daily_open=sig_row['daily_open'],
-                    vwap=sig_row['vwap'],
-                    atr=sig_row['atr'],
-                    candle_high=sig_row['high'],
-                    candle_low=sig_row['low'],
-                    structure_sig=struct_sig,
-                    global_filter_ok=global_ok,
-                    is_daily=is_daily,
-                    disabled_filters=disabled_filters
-                )
+                    bos_sig = int(struct_row['bos_signal'])
+                    mss_sig = int(struct_row['mss_signal'])
+                    common = dict(
+                        close=sig_row['close'], open_val=sig_row['open'],
+                        daily_open=sig_row['daily_open'], vwap=sig_row['vwap'],
+                        atr=sig_row['atr'], candle_high=sig_row['high'],
+                        candle_low=sig_row['low'], global_filter_ok=global_ok,
+                        is_daily=is_daily,
+                    )
+                    # (1) BOS 續勢進場：全維度濾網（語意同 007 前）
+                    if bos_sig == 1:
+                        is_entry = pm.check_entry_signal(
+                            structure_sig=1, disabled_filters=disabled_filters, **common
+                        )
+                    # (2) MSS 反轉進場（長側）：反轉本質逆勢，放寬順勢/regime 濾網
+                    #     （research D6：複用 disabled_filters ∪ {'trend','global'}）。
+                    if (not is_entry) and mss_reversal_entry and mss_sig == 1:
+                        reversal_filters = disabled_filters | frozenset({'trend', 'global'})
+                        if pm.check_entry_signal(
+                            structure_sig=1, disabled_filters=reversal_filters, **common
+                        ):
+                            is_entry = True
+                            entry_reason = "MSS 反轉進場做多"
+                    # 看跌反轉（mss_sig == -1）為短側做空 → BLOCKED-003（long-only 暫不支援）
 
                 if is_entry:
                     # 以次根開盤價成交 (含滑點成本)
@@ -233,7 +247,7 @@ class BacktestEngine:
                         "commission": fee,
                         "tax": 0.0,
                         "cash": capital,
-                        "event": "滿足多重確認進場做多"
+                        "event": entry_reason
                     })
             
             # 若目前有持倉，動態更新與管理部位

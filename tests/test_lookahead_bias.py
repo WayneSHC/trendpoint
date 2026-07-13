@@ -199,8 +199,10 @@ def _make_portfolio_frame(dates: pd.DatetimeIndex) -> pd.DataFrame:
         "daily_open": np.full(n, 100.0),
         "mid_price": np.full(n, 50.0),
         "regime_ok": np.full(n, True),
-        "mss_signal": np.full(n, 1),
-        "bos_signal": np.full(n, 0),
+        # spec 007：進場分流後，通用進場觸發改用 BOS 續勢（本測試驗證成交時序，
+        # 與 MSS 反轉語意無關）。struct_sig=1 路徑與濾網與原本一致。
+        "mss_signal": np.full(n, 0),
+        "bos_signal": np.full(n, 1),
         "chandelier_long": np.full(n, 90.0),
         "realized_vol": np.full(n, 0.2),
         "param_time_limit": np.full(n, 10),
