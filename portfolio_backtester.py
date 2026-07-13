@@ -372,12 +372,14 @@ class PortfolioBacktester:
                         # (1) BOS 續勢進場：全維度濾網（語意同 007 前）
                         if bos_sig == 1:
                             is_entry = pm.check_entry_signal(structure_sig=1, **common)
-                        # (2) MSS 反轉進場（長側）：放寬順勢/regime 濾網（research D6）
+                        # (2) MSS 反轉進場（長側）：放寬 trend + 200MA regime，但保留三關價
+                        #     （close>mid_price；research D6 修訂——global 濾網只留三關價）
                         if (not is_entry) and mss_rev_on and mss_sig == 1:
+                            rev_common = {**common, 'global_filter_ok': bool(sig_row['close'] > sig_row['mid_price'])}
                             is_entry = pm.check_entry_signal(
                                 structure_sig=1,
-                                disabled_filters=frozenset({'trend', 'global'}),
-                                **common
+                                disabled_filters=frozenset({'trend'}),
+                                **rev_common
                             )
                         # 看跌反轉（mss_sig == -1）為短側做空 → BLOCKED-003（long-only 暫不支援）
                     

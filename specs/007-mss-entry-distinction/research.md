@@ -39,7 +39,8 @@
 
 ## D6 — 反轉進場閘門（解決 200MA 順勢濾網衝突）
 
-- **Decision**: MSS 反轉進場**複用既有 `check_entry_signal` 的 `disabled_filters` 消融機制**，以「反轉 profile」進場：停用 `'trend'` 與 `'global'` 維度（即繞過 `close>vwap/daily_open` 順勢確認與含 200MA 的 regime 濾網），保留 `structure` + `momentum` + `volatility`。BOS 續勢進場維持原本全維度 profile 不變。
+- **Decision**: MSS 反轉進場**複用既有 `check_entry_signal` 的 `disabled_filters` 消融機制**，以「反轉 profile」進場：停用 `'trend'` 維度（繞過 `close>vwap/daily_open` 順勢確認），並在呼叫端把 `global_filter_ok` 改為**只留三關價**（`close>mid_price`）、去掉 200MA regime；保留 `structure` + `momentum` + `volatility`。BOS 續勢進場維持原本全維度 profile 不變。
+- **修訂（2026-07-12，US2 實作）**：初版停用 `{'trend','global'}` 會連三關價一併繞過；因三關價是 spec 003 關閉時強調的空頭防線，改為**保留三關價、只放寬 trend + regime**。實測代表標的回測數字與初版**完全相同**（反轉進場本就在中關價之上），故收緊零成本。
 - **Rationale**: 看漲反轉本質發生在 200MA 下方，若套順勢/regime 濾網會被靜默封殺、使 SC-002/SC-003 無法達成。既有 `disabled_filters`（`ladder_system.py:509`）已提供乾淨的維度旁路，複用即可、零新抽象。
 - **Alternatives**: (a) 反轉專用的獨立進場函式——多一份邏輯、重複；(b) 反轉時反轉 200MA 濾網方向——語意含糊。均否決。
 - **短側注意**: `momentum_ok = close>open_val`、`trend` 維度目前偏多；看跌反轉（做空）需 `check_entry_signal` 的方向泛化——屬 **spec 003**。007 的反轉 profile 對**長側**直接可用。

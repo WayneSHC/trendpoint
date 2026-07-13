@@ -195,12 +195,14 @@ class BacktestEngine:
                         is_entry = pm.check_entry_signal(
                             structure_sig=1, disabled_filters=disabled_filters, **common
                         )
-                    # (2) MSS 反轉進場（長側）：反轉本質逆勢，放寬順勢/regime 濾網
-                    #     （research D6：複用 disabled_filters ∪ {'trend','global'}）。
+                    # (2) MSS 反轉進場（長側）：放寬順勢確認(trend)與 200MA regime，
+                    #     但**保留三關價**（close>mid_price，spec 003 強調的空頭防線）——
+                    #     反轉的 global 濾網只留三關價、去掉 regime（research D6 修訂）。
                     if (not is_entry) and mss_reversal_entry and mss_sig == 1:
-                        reversal_filters = disabled_filters | frozenset({'trend', 'global'})
+                        reversal_filters = disabled_filters | frozenset({'trend'})
+                        rev_common = {**common, 'global_filter_ok': bool(sig_row['close'] > sig_row['mid_price'])}
                         if pm.check_entry_signal(
-                            structure_sig=1, disabled_filters=reversal_filters, **common
+                            structure_sig=1, disabled_filters=reversal_filters, **rev_common
                         ):
                             is_entry = True
                             entry_reason = "MSS 反轉進場做多"
