@@ -14,9 +14,10 @@ TrendPoint - 歷史回測執行與驗證腳本 (Run Backtest)
 
 import os
 import pandas as pd
-from backtester import BacktestEngine
+from backtester import BacktestEngine, assert_backtestable
 from config import load_config
-from db_security import safe_load_db_data
+from db_security import safe_load_db_data, table_name_for
+from instruments import equity_instrument
 from performance import format_performance_report
 from monte_carlo import bootstrap_trades, format_monte_carlo_report
 
@@ -64,10 +65,9 @@ def run():
     # 動態設定回測標的與對應表名
     test_cases = []
     for ticker in cfg.data.tickers:
-        clean_ticker = ticker.replace(".", "_")
         test_cases.append({
             "ticker": ticker,
-            "table": f"stock_{clean_ticker}_daily"
+            "table": table_name_for(equity_instrument(ticker), "daily")
         })
     
     # 建立回測引擎，直接傳入設定檔規格物件
@@ -86,10 +86,15 @@ def run():
                 
             print(f"載入成功，共 {len(df)} 筆 K 線數據。")
             
+            # spec 008a 護欄（入口層）：dispatch 前拒絕對期貨回測
+            instrument = equity_instrument(ticker)
+            assert_backtestable(instrument.asset_class)
+
             # 執行回測，使用該標的專屬（或預設）的策略參數規格
             params = cfg.strategy.get_params_for_ticker(ticker)
             results = engine.run_backtest(
                 df=df,
+                asset_class=instrument.asset_class,
                 atr_period=params.atr_period,
                 k=params.ladder_k,
                 ch_period=params.chandelier_period,

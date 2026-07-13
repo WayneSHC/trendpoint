@@ -103,3 +103,17 @@ git 出現詭異損毀時第一個懷疑 Drive 同步衝突（找 `*conflicted c
   Wayne 的 Drive repo），可用 `db_security.safe_save_to_sqlite` 逐檔灌入，
   表名 `stock_{stem}`（stem 為 CSV 去副檔名，如 `0050_TW_daily`）。
   新測試不依賴 db——全用 `tests/acceptance_fixtures.py` 的合成 K 線，離線可跑。
+- 2026-07-12（續）：**spec 002（MSS 之 FVG 確認）走完整 Spec Kit plan→tasks→
+  implement 完成並合併**（PR #10，merge commit）。17/17 任務、pytest 84 passed、
+  no-numba 17 passed。`_detect_fvg` + `detect_market_structure(use_fvg=)` 折進
+  MSS 遮罩（比照 regime 建構期濾網），`use_fvg=False` 六 CSV sha256 逐位元重現
+  基準。config 預設 `use_fvg: true` 全系統開啟；組合回測亦穿線（Wayne 定案：
+  全系統一致）。**關鍵發現（已落 baseline-pre-fvg.md）**：`bull_mss =
+  bull_bos & strong_volume` ⇒ 每個 MSS bar 必也是 BOS bar（mss⊆bos），而進場
+  用 `mss==±1 or bos==±1`，故 FVG 濾 mss **改不了任何交易**——SC-001（訊號數
+  下降）與監控假告警達標，但回測 P&L 零 delta（T014 消融確認）。這揭露 MSS
+  在進場中被 BOS 涵蓋、形同虛設的既有設計問題，**已開後續任務**
+  （建議 spec 007「讓 MSS 在進場具區別性」，task chip task_42a3f96d）。
+  剩餘 Draft：005-extreme-regime、006-exit-system-completion；但 mss⊆bos
+  的區別性議題（007）在價值序上可能優先於 005/006。仍待使用者決定：搬離
+  Google Drive、裁剪 plugin、TrendPoint_OpenSpec.md 是否移入 docs/。

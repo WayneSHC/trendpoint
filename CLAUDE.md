@@ -46,13 +46,16 @@ python monitor_signals.py --once   # 單次訊號檢測與推播
 - 演算法核心：`ladder_system.py`（階梯系統）、`performance.py`（KPI）
 - 回測：`backtester.py`（單標的）、`portfolio_backtester.py`、`walk_forward.py`、
   `optimizer.py`、`monte_carlo.py`、`run_*.py` 為各入口
-- 資料：`data_ingestion.py` → SQLite `trendpoint.db`（gitignored）；`data/*.csv` 為快取
+- 資料：`instruments.py`（Instrument 資產類別抽象 + registry，spec 008a）→
+  `data_sources/`（可插拔來源 adapter：yfinance/csv/mock，rollover 由 adapter 自理）→
+  `data_ingestion.py` → SQLite `trendpoint.db`（gitignored）；表名一律經
+  `db_security.table_name_for`（equity→`stock_*`、futures→`fut_*`）；`data/*.csv` 為快取
 - 通知：`monitor_signals.py` + `alerts.py`（LINE Messaging API / Telegram，無憑證時 Mock）
 - UI：`app.py`（Streamlit，禁止內嵌演算法邏輯）
 - 規格：`specs/001` 為 as-built 基準；`002`（FVG 確認）已併入 main；
-  `003`（短側）2026-07-12 重開為**台指期限定**、阻塞於期貨基礎建設；
-  `007`（MSS fractal 反轉進場）長側已實作（US1–US3，SC-003 未達成如實記錄），短側待 003；
-  `004~006` 見各 spec.md 狀態。新功能走 Spec Kit：
+  `007`（MSS fractal 反轉進場）長側已實作並併入 main（US1–US3，SC-003 未達成如實記錄），短側待 003；
+  `008a`（台指期資料層抽象）已併入 main；`003`（短側）2026-07-12 重開為**台指期限定**、
+  待 008b（成本/口數）；`004~006` 見各 spec.md 狀態。新功能走 Spec Kit：
   `/speckit-specify` → `/speckit-plan` → `/speckit-tasks` → `/speckit-implement`
 - 理論：`three_bands_theory.md`、`docs/ladder-optimization-research.md`（階梯優化研究，
   原 docx 之正式版）；歷史文件：`TrendPoint_OpenSpec.md`（勿當現行規格）

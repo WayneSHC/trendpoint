@@ -99,7 +99,7 @@ def clean_kline_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
     return cleaned_df
 
-def validate_data_contract(df: pd.DataFrame, *, quality=None) -> bool:
+def validate_data_contract(df: pd.DataFrame, *, quality=None, asset_class="equity") -> bool:
     """
     驗證資料是否符合時序資料合約規格 (Data Contract Spec)
     - 必須包含 datetime 索引 (DatetimeIndex)
@@ -145,20 +145,21 @@ def validate_data_contract(df: pd.DataFrame, *, quality=None) -> bool:
     if (df["volume"] < 0.0).any():
         raise ValueError("資料合約驗證失敗：欄位 volume 包含負數值")
 
-    # 5. 相鄰收盤跳動離群偵測（閾值集中於 config，憲法 V）
+    # 5. 相鄰收盤跳動離群偵測（閾值集中於 config，憲法 V；spec 008a：per-asset-class）
     if quality is None:
         from config import load_config
         quality = load_config().data_quality
+    threshold = quality.jump_ratio_for(asset_class) if hasattr(quality, "jump_ratio_for") else quality.max_close_jump_ratio
     jump = df["close"].pct_change().iloc[1:].abs()
-    over = jump > quality.max_close_jump_ratio
+    over = jump > threshold
     if over.any():
         ts = jump.index[over][0]
         ratio = jump[over].iloc[0]
         logger.warning("資料離群：收盤價於 %s 跳動比率 %.4g 超過上限 %.4g",
-                       ts, ratio, quality.max_close_jump_ratio)
+                       ts, ratio, threshold)
         raise ValueError(
             f"資料合約驗證失敗：相鄰收盤跳動 {ratio:.4g} 超過上限 "
-            f"{quality.max_close_jump_ratio:.4g}（疑似資料錯誤）")
+            f"{threshold:.4g}（疑似資料錯誤）")
 
     return True
 

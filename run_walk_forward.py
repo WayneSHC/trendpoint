@@ -18,7 +18,8 @@ import sys
 
 from backtester import BacktestEngine
 from config import load_config
-from db_security import safe_load_db_data
+from db_security import safe_load_db_data, table_name_for
+from instruments import equity_instrument
 from walk_forward import WalkForwardAnalyzer, format_walk_forward_report
 
 
@@ -36,8 +37,7 @@ def run(target_ticker: str = None):
     analyzer = WalkForwardAnalyzer(engine=engine)
 
     for ticker in tickers:
-        clean_ticker = ticker.replace(".", "_")
-        table_name = f"stock_{clean_ticker}_daily"
+        table_name = table_name_for(equity_instrument(ticker), "daily")
 
         df = safe_load_db_data(db_path, table_name)
         if df is None or df.empty:

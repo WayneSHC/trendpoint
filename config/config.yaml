@@ -8,6 +8,14 @@ data:
   - 00878.TW
   - 00919.TW
   - 00631L.TW
+  # spec 008a：結構化 instrument（期貨）。source=mock 供端到端驗證，來源後補。
+  instruments:
+  - id: TXF
+    asset_class: futures
+    source: mock
+    display_name: 台指期近月（mock）
+    timeframes:
+    - daily
 data_quality:
   max_close_jump_ratio: 3.0
 strategy:
