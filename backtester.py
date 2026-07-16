@@ -22,18 +22,24 @@ from ladder_system import (
     FULL_EXIT_EVENTS
 )
 from performance import compute_performance_metrics
+from trading_costs import EquityCostModel, EquitySizer
 
 
 class FuturesBacktestNotSupportedError(ValueError):
-    """對期貨 instrument 呼叫回測——008a 資料層尚不支援（需 008b 成本/口數模型）。"""
+    """期貨回測不支援之路徑護欄（008a 引入；008b 後僅組合路徑仍使用）。"""
 
 
 def assert_backtestable(asset_class="equity") -> None:
-    """spec 008a 護欄：拒絕對期貨 instrument 回測（僅拒絕，不做任何成本/sizing）。"""
+    """範圍護欄：拒絕對期貨 instrument 回測。
+
+    spec 008b 後，單標的路徑（BacktestEngine.run_backtest / run_backtest.py）
+    已支援期貨、不再呼叫本函式；**組合路徑**（portfolio）的期貨元件接入
+    不在 008b 範圍，仍以本函式擋下（008b analyze H1，憲章 II 邊界防護）。
+    """
     ac = getattr(asset_class, "value", asset_class)
     if ac == "futures":
         raise FuturesBacktestNotSupportedError(
-            "期貨回測需 008b 成本/口數模型；008a 資料層尚不支援對期貨回測。"
+            "組合回測之期貨接入尚未支援（008b 僅單標的）；期貨組合待後續 spec。"
         )
 
 
@@ -100,6 +106,9 @@ class BacktestEngine:
                      volume_mult: float = 1.5,
                      mss_reversal_entry: bool = False,
                      asset_class: str = "equity",
+                     cost_model = None,
+                     sizer = None,
+                     point_value: float = 1.0,
                      disabled_filters: frozenset = frozenset(),
                      verbose: bool = True) -> Dict[str, Any]:
         """
@@ -122,14 +131,23 @@ class BacktestEngine:
             er_threshold (float): ER 低於此值視為高噪音
             use_fvg (bool): 啟用 FVG 確認（MSS 須近 fvg_lookback 根內有同向缺口，spec 002）
             fvg_lookback (int): FVG 回看根數 M (預設 3)
+            asset_class (str): "equity"（預設）或 "futures"（spec 008b：期貨會計語意）
+            cost_model (CostModel, optional): 摩擦成本元件；None → 現股元件（現行語意，位元不變）
+            sizer (PositionSizer, optional): 部位 sizing 元件；None → 現股整張元件
+            point_value (float): 每點價值（現股 1.0；期貨 = 契約乘數，P&L = units×Δ價×此值）
             disabled_filters (frozenset): 消融測試用，可停用 'structure'/'momentum'/'trend'/'volatility'/'global'/'regime'/'fvg'
             verbose (bool): 是否輸出進度訊息
 
         回傳:
             Dict: 包含績效指標摘要 (summary)、淨值曲線 (equity_curve) 與交易日誌 (trades)
         """
-        # spec 008a 護欄（引擎層）：拒絕對期貨回測（僅拒絕，不做成本/sizing）
-        assert_backtestable(asset_class)
+        # spec 008b：成本/sizing 元件注入——預設現股元件（既有呼叫零改動、現貨路徑位元不變）
+        if cost_model is None:
+            cost_model = EquityCostModel(self.commission_rate, self.tax_rate, self.slippage_rate)
+        if sizer is None:
+            sizer = EquitySizer(self.commission_rate, self.lot_size)
+        is_futures = (getattr(asset_class, "value", asset_class) == "futures")
+        blown_up = False
 
         if verbose:
             print("開始進行策略回測...")
@@ -227,16 +245,18 @@ class BacktestEngine:
                     # 看跌反轉（mss_sig == -1）為短側做空 → BLOCKED-003（long-only 暫不支援）
 
                 if is_entry:
-                    # 以次根開盤價成交 (含滑點成本)
+                    # 以次根開盤價成交 (滑價由成本元件計入成交價)
                     raw_price = row['open']
-                    execution_price = raw_price * (1 + self.slippage_rate)
+                    execution_price = cost_model.slip(raw_price, "buy")
 
-                    # 整股單位買入：股數向下取整至 lot_size 倍數（台股一張 1000 股）
-                    max_affordable = capital / (execution_price * (1.0 + self.commission_rate))
-                    position_shares = self.round_to_lot(max_affordable)
+                    # sizing 價格語意按資產類別（008b analyze M1）：
+                    # equity = 成交價（現行語意：以成交價算最大可負擔股數）；
+                    # futures = 訊號根收盤價（FR-004 保證金以訊號根名目值計，憲章 I）
+                    sizing_price = float(sig_row['close']) if is_futures else execution_price
+                    position_shares = sizer.size(capital, sizing_price)
 
                     if position_shares <= 0.0:
-                        # 資金不足以買進一張，放棄此次訊號
+                        # 資金不足以買進最小單位（一張/一口），放棄此次訊號
                         current_equity = capital
                         equity_curve.append({
                             "datetime": current_time,
@@ -247,8 +267,13 @@ class BacktestEngine:
                         continue
 
                     cost = position_shares * execution_price
-                    fee = cost * self.commission_rate
-                    capital -= (cost + fee)
+                    entry_costs = cost_model.entry_costs(execution_price, position_shares)
+                    fee = entry_costs.commission
+                    if is_futures:
+                        # 期貨：不付名目、僅扣摩擦成本（保證金為佔用而非支出）
+                        capital -= entry_costs.total
+                    else:
+                        capital -= (cost + fee)
 
                     # 設定部位管理器參數
                     pm.is_active = True
@@ -259,16 +284,26 @@ class BacktestEngine:
                     pm.direction = 1
                     entry_bar_idx = i
                     
-                    trade_logs.append({
+                    entry_log = {
                         "datetime": current_time,
                         "action": "BUY",
                         "shares": position_shares,
                         "price": execution_price,
                         "commission": fee,
-                        "tax": 0.0,
+                        "tax": entry_costs.tax,
                         "cash": capital,
                         "event": entry_reason
-                    })
+                    }
+                    if is_futures:
+                        # 期貨紀錄擴充（FR-006/data-model）：point_value 供績效配對換算 NT$；
+                        # margin_used 為佔用保證金（sizing 約束之稽核欄位）
+                        entry_log["point_value"] = point_value
+                        entry_log["sizing_price"] = sizing_price
+                        margin_fn = getattr(sizer, "margin_per_lot", None)
+                        entry_log["margin_used"] = (
+                            margin_fn(sizing_price) * position_shares if margin_fn else 0.0
+                        )
+                    trade_logs.append(entry_log)
             
             # 若目前有持倉，動態更新與管理部位
             elif pm.is_active and position_shares > 0.0:
@@ -291,23 +326,28 @@ class BacktestEngine:
                 
                 # 處理減半平倉 (階段 1 止盈)
                 if event is ExitEvent.STAGE1_HALF:
-                    execution_price = row['open'] * (1 - self.slippage_rate)
-                    # 賣出股數同樣受整股單位約束；若僅持有一張無法分割，
-                    # 則跳過實際賣出，但 PositionManager 已將止損移至保本位，
-                    # 經濟意義等同「部位太小不拆分、直接轉為零風險持倉」。
-                    shares_to_sell = self.round_to_lot(position_shares * 0.5)
+                    execution_price = cost_model.slip(row['open'], "sell")
+                    # 賣出單位受最小單位約束（現股整張 / 期貨整數口，FR-012）；
+                    # 若僅持有一張（口）無法分割，則跳過實際賣出，但 PositionManager
+                    # 已將止損移至保本位——經濟意義等同「部位太小不拆分、轉零風險持倉」。
+                    shares_to_sell = sizer.partial_units(position_shares, 0.5)
 
                     if shares_to_sell > 0.0:
                         revenue = shares_to_sell * execution_price
 
-                        # 扣除手續費與證券交易稅
-                        commission = revenue * self.commission_rate
-                        tax = revenue * self.tax_rate
+                        exit_costs = cost_model.exit_costs(execution_price, shares_to_sell)
+                        commission = exit_costs.commission
+                        tax = exit_costs.tax
 
-                        capital += revenue - (commission + tax)
+                        if is_futures:
+                            # 期貨：入帳 = 已實現點數損益 × 乘數 − 摩擦成本
+                            realized = shares_to_sell * (execution_price - pm.entry_price) * point_value
+                            capital += realized - exit_costs.total
+                        else:
+                            capital += revenue - (commission + tax)
                         position_shares -= shares_to_sell
 
-                        trade_logs.append({
+                        half_log = {
                             "datetime": current_time,
                             "action": "SELL_HALF",
                             "shares": shares_to_sell,
@@ -316,21 +356,29 @@ class BacktestEngine:
                             "tax": tax,
                             "cash": capital,
                             "event": event.value
-                        })
+                        }
+                        if is_futures:
+                            half_log["point_value"] = point_value
+                        trade_logs.append(half_log)
                 
                 # 處理全數平倉 (止損、時間止盈或剩餘部位吊燈止損)
                 elif event in FULL_EXIT_EVENTS:
-                    execution_price = row['open'] * (1 - self.slippage_rate)
+                    execution_price = cost_model.slip(row['open'], "sell")
                     shares_sold = position_shares
                     revenue = shares_sold * execution_price
 
-                    commission = revenue * self.commission_rate
-                    tax = revenue * self.tax_rate
+                    exit_costs = cost_model.exit_costs(execution_price, shares_sold)
+                    commission = exit_costs.commission
+                    tax = exit_costs.tax
 
-                    capital += revenue - (commission + tax)
+                    if is_futures:
+                        realized = shares_sold * (execution_price - pm.entry_price) * point_value
+                        capital += realized - exit_costs.total
+                    else:
+                        capital += revenue - (commission + tax)
                     position_shares = 0.0
 
-                    trade_logs.append({
+                    full_log = {
                         "datetime": current_time,
                         "action": "SELL_ALL",
                         "shares": shares_sold,
@@ -339,23 +387,70 @@ class BacktestEngine:
                         "tax": tax,
                         "cash": capital,
                         "event": event.value
-                    })
+                    }
+                    if is_futures:
+                        full_log["point_value"] = point_value
+                    trade_logs.append(full_log)
             
-            # 更新淨值曲線
-            current_equity = capital + (position_shares * row['close'])
+            # 更新淨值曲線（期貨：權益 = 現金 + 未實現點數損益×乘數；現貨：現金 + 市值）
+            if is_futures:
+                if position_shares > 0.0:
+                    unrealized = position_shares * (row['close'] - pm.entry_price) * point_value
+                    current_equity = capital + unrealized
+                    position_value_now = position_shares * row['close'] * point_value  # 名目（曝險）
+                else:
+                    current_equity = capital
+                    position_value_now = 0.0
+
+                # spec 008b FR-011 爆倉防護：權益 ≤ 0 當根以當根收盤強制結清並終止
+                if current_equity <= 0.0:
+                    if position_shares > 0.0:
+                        forced_price = row['close']
+                        forced_costs = cost_model.exit_costs(forced_price, position_shares)
+                        realized = position_shares * (forced_price - pm.entry_price) * point_value
+                        capital += realized - forced_costs.total
+                        forced_log = {
+                            "datetime": current_time,
+                            "action": "SELL_ALL",
+                            "shares": position_shares,
+                            "price": forced_price,
+                            "commission": forced_costs.commission,
+                            "tax": forced_costs.tax,
+                            "cash": capital,
+                            "event": "爆倉強制結清 (FORCED_LIQUIDATION)",
+                            "point_value": point_value,
+                        }
+                        trade_logs.append(forced_log)
+                        position_shares = 0.0
+                        pm.is_active = False
+                    blown_up = True
+                    current_equity = capital
+                    equity_curve.append({
+                        "datetime": current_time,
+                        "capital": capital,
+                        "position_value": 0.0,
+                        "equity": current_equity
+                    })
+                    break  # 權益曲線截止於爆倉當根（FR-011）
+            else:
+                current_equity = capital + (position_shares * row['close'])
+                position_value_now = position_shares * row['close']
+
             equity_curve.append({
                 "datetime": current_time,
                 "capital": capital,
-                "position_value": position_shares * row['close'],
+                "position_value": position_value_now,
                 "equity": current_equity
             })
-            
+
         # 3. 整理回測結果與統計指標
         df_equity = pd.DataFrame(equity_curve).set_index("datetime")
         df_trades = pd.DataFrame(trade_logs)
         
         summary = self._calculate_metrics(df_equity, df_trades)
-        
+        if is_futures:
+            summary["blown_up"] = blown_up
+
         return {
             "summary": summary,
             "equity_curve": df_equity,
@@ -409,18 +504,22 @@ class BacktestEngine:
                                            (df_trades['datetime'] < sell_time)]
                                            
                     # 計算總投入成本與總回收金額
-                    initial_cost = buy_row['shares'] * buy_row['price'] + buy_row['commission']
+                    # spec 008b：期貨紀錄帶 point_value（點→NT$ 換算）；現貨無此欄 → 1.0
+                    #（×1.0 對正浮點為位元恆等，現貨配對數字不變）
+                    pv_buy = buy_row.get('point_value', 1.0)
+                    initial_cost = buy_row['shares'] * buy_row['price'] * pv_buy + buy_row['commission']
 
                     total_revenue = 0.0
-                    total_friction = sell_row['commission'] + sell_row['tax']
+                    # 期貨進場邊亦有期交稅（現貨進場 tax=0.0，+0.0 位元恆等）
+                    total_friction = sell_row['commission'] + sell_row['tax'] + buy_row['tax']
 
                     if not half_sells.empty:
                         for _, half_row in half_sells.iterrows():
-                            total_revenue += half_row['shares'] * half_row['price']
+                            total_revenue += half_row['shares'] * half_row['price'] * half_row.get('point_value', 1.0)
                             total_friction += half_row['commission'] + half_row['tax']
 
                     # 使用 SELL_ALL 實際記錄之賣出股數（整股取整後不必然等於買入股數之半）
-                    total_revenue += sell_row['shares'] * sell_row['price']
+                    total_revenue += sell_row['shares'] * sell_row['price'] * sell_row.get('point_value', 1.0)
 
                     profit = total_revenue - initial_cost - total_friction
                     paired_trades.append((profit, profit / initial_cost))
