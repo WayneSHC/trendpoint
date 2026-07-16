@@ -12,14 +12,34 @@ equity/yfinance instrument。
 """
 
 from enum import Enum
-from typing import List
+from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class AssetClass(str, Enum):
     EQUITY = "equity"
     FUTURES = "futures"
+
+
+class ContractSpec(BaseModel):
+    """期貨契約內生規格（spec 008b）：乘數/tick/交易所定額費。
+
+    帳戶政策層參數（保證金率、使用率、券商加收）不在此——它們屬
+    `trading_cost.futures`（config），本類只放隨**契約**變動的常數。
+    TAIFEX 權威值（每口每邊，經手費+結算費）：TX=20、MTX=12.5、TMF=8.0。
+    """
+
+    model_config = {"frozen": True}
+
+    point_value: float = Field(..., gt=0.0, description="每點價值 NT$（TX=200、MTX=50、TMF=10）")
+    tick_size: float = Field(default=1.0, gt=0.0, description="最小跳動點數（台指類=1 點）")
+    exchange_fee_per_lot: float = Field(..., ge=0.0, description="交易所每口每邊定額費（經手費+結算費）NT$")
+
+    @property
+    def tick_value(self) -> float:
+        """每 tick 價值 NT$ = tick_size × point_value。"""
+        return self.tick_size * self.point_value
 
 
 class Instrument(BaseModel):
@@ -32,6 +52,19 @@ class Instrument(BaseModel):
     source: str = Field(default="yfinance", description="資料來源 adapter 鍵")
     display_name: str = Field(default="", description="顯示名，預設 = id")
     timeframes: List[str] = Field(default_factory=lambda: ["daily"], description="支援時框")
+    contract: Optional[ContractSpec] = Field(
+        default=None,
+        description="期貨契約規格（spec 008b）；futures 必帶、equity 必為 None"
+    )
+
+    @model_validator(mode="after")
+    def _check_contract_matches_asset_class(self) -> "Instrument":
+        # spec 008b FR-001/data-model：契約規格與資產類別必須一致（fail-fast）
+        if self.asset_class == AssetClass.FUTURES and self.contract is None:
+            raise ValueError(f"futures instrument '{self.id}' 必須帶 contract（ContractSpec）")
+        if self.asset_class == AssetClass.EQUITY and self.contract is not None:
+            raise ValueError(f"equity instrument '{self.id}' 不得帶 contract（現貨無契約乘數）")
+        return self
 
     @property
     def name(self) -> str:

@@ -8,7 +8,10 @@ spec 008a US2 — Instrument registry 解析與向後相容（SC-005）。
 
 import pytest
 
-from instruments import InstrumentRegistry, Instrument, AssetClass, equity_instrument
+from instruments import InstrumentRegistry, Instrument, AssetClass, ContractSpec, equity_instrument
+# spec 008b：futures instrument 必帶 ContractSpec（TX 權威值 200/1/20）
+_C = ContractSpec(point_value=200.0, tick_size=1.0, exchange_fee_per_lot=20.0)
+
 
 
 def test_plain_ticker_resolves_to_equity_yfinance():
@@ -18,13 +21,13 @@ def test_plain_ticker_resolves_to_equity_yfinance():
 
 
 def test_structured_instrument_parsed():
-    fut = Instrument(id="TXF", asset_class=AssetClass.FUTURES, source="mock")
+    fut = Instrument(id="TXF", asset_class=AssetClass.FUTURES, source="mock", contract=_C)
     reg = InstrumentRegistry.from_config([], [fut])
     assert reg.resolve("TXF").asset_class == AssetClass.FUTURES
 
 
 def test_id_conflict_failfast():
-    fut = Instrument(id="2330.TW", asset_class=AssetClass.FUTURES, source="mock")
+    fut = Instrument(id="2330.TW", asset_class=AssetClass.FUTURES, source="mock", contract=_C)
     with pytest.raises(ValueError):
         InstrumentRegistry.from_config(["2330.TW"], [fut])  # ticker 與 instrument 撞名
 

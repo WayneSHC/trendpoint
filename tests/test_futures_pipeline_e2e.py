@@ -12,7 +12,10 @@ spec 008a US1 — 期貨資料端到端（SC-002）。
 import pandas as pd
 
 from config import DataQualityConfig
-from instruments import Instrument, AssetClass
+from instruments import Instrument, AssetClass, ContractSpec
+# spec 008b：futures instrument 必帶 ContractSpec（TX 權威值 200/1/20）
+_C = ContractSpec(point_value=200.0, tick_size=1.0, exchange_fee_per_lot=20.0)
+
 from data_sources import get_adapter
 from data_ingestion import validate_data_contract
 from db_security import table_name_for, safe_save_to_sqlite, safe_load_db_data
@@ -20,7 +23,7 @@ from db_security import table_name_for, safe_save_to_sqlite, safe_load_db_data
 
 def test_futures_pipeline_end_to_end(tmp_path):
     inst = Instrument(id="TXF", asset_class=AssetClass.FUTURES, source="mock",
-                      display_name="台指期近月（mock）")
+                      display_name="台指期近月（mock）", contract=_C)
 
     # 1) adapter 取得連續序列（含 rollover 跳空）
     df = get_adapter(inst.source).fetch(inst, "daily")
@@ -51,7 +54,7 @@ def test_futures_pipeline_end_to_end(tmp_path):
 
 def test_futures_rollover_gap_present():
     """mock 刻意含一段 rollover 跳空——驗證抽象在『真形狀』資料上受測。"""
-    inst = Instrument(id="TXF", asset_class=AssetClass.FUTURES, source="mock")
+    inst = Instrument(id="TXF", asset_class=AssetClass.FUTURES, source="mock", contract=_C)
     df = get_adapter("mock").fetch(inst, "daily")
     max_jump = df["close"].pct_change().abs().max()
     assert max_jump > 0.03, "mock 應含一段明顯跳空（rollover 怪癖）"
