@@ -21,7 +21,7 @@ lookahead）、US2（零回歸雙保證）、US3（裁決 + 推播能力）。
 
 ## Phase 1: Setup
 
-- [ ] T001 [P] 確認回歸基線：`pytest -q` 全綠（133）+ `python run_backtest.py` 現貨 5 檔
+- [x] T001 [P] 確認回歸基線：`pytest -q` 全綠（133）+ `python run_backtest.py` 現貨 5 檔
   與期貨 long-only（TXF 46.74%/4 筆、MTX 9.16%/1 筆）數字與 quickstart V1 表逐位元相同，
   記錄至 `specs/003-short-side/baseline-check.md`（SC-003 對照錨點）
 
@@ -31,19 +31,19 @@ lookahead）、US2（零回歸雙保證）、US3（裁決 + 推播能力）。
 
 **⚠️ CRITICAL**: 新參數預設值 = 現行為；本階段完成後全套既有測試必須仍綠。
 
-- [ ] T002 `config/config.py`：`SingleStrategyParams.enable_short: bool = False`（Field，
+- [x] T002 `config/config.py`：`SingleStrategyParams.enable_short: bool = False`（Field，
   期貨限定語意入 description）+ SystemConfig model validator——`ticker_overrides` 中
   **現貨** ticker 明設 `enable_short: true` → ValueError fail-fast（`default.enable_short`
   不受限；契約見 contracts D6 段）
-- [ ] T003 `ladder_system.py`：`check_entry_signal` 增 `direction: int = 1` 參數——
+- [x] T003 `ladder_system.py`：`check_entry_signal` 增 `direction: int = 1` 參數——
   direction=1 四維度**逐字現行為**；direction=-1 鏡像（結構==−1、收陰 close<open、
   價<當日開盤【非日線再 AND <VWAP】、振幅同式）；`disabled_filters` 語意不變
-- [ ] T004 `ladder_system.py`：`manage_position` 增可選參數 `chandelier_short: float = None`
+- [x] T004 `ladder_system.py`：`manage_position` 增可選參數 `chandelier_short: float = None`
   + `direction == -1` 分支——止損 `close >= stop_loss`、階段 1 目標 `entry − 1.5×ATR`
   （達標 STAGE1_HALF + 止損移保本）、階段 2 吊燈只降不升（`chandelier_short < stop_loss`
   時下移、`close > stop_loss` → CHANDELIER）、時間止盈同；direction=-1 且 stage==2 而
   chandelier_short is None → ValueError；**direction==1 分支逐字不動**
-- [ ] T005 `ladder_system.py`：空方市況濾網——`calculate_regime_filter` 支援方向（ADX/ER
+- [x] T005 `ladder_system.py`：空方市況濾網——`calculate_regime_filter` 支援方向（ADX/ER
   分量共用、MA 分量鏡像 價<長均線），`build_indicator_frame` include_regime 時增產
   `regime_ok_short` 欄位；`regime_ok`（多方）**逐字不動**；消融 'regime' 語意同多方
 
