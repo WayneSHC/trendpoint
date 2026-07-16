@@ -44,8 +44,10 @@ python monitor_signals.py --once   # 單次訊號檢測與推播
 ## 專案地圖（開場不需要再 ls 探索）
 
 - 演算法核心：`ladder_system.py`（階梯系統）、`performance.py`（KPI）
-- 回測：`backtester.py`（單標的）、`portfolio_backtester.py`、`walk_forward.py`、
-  `optimizer.py`、`monte_carlo.py`、`run_*.py` 為各入口
+- 回測：`backtester.py`（單標的，成本/sizing 走可插拔元件）、`trading_costs.py`
+  （CostModel/PositionSizer 元件 + for_asset_class 工廠，spec 008b：現股 ad-valorem/
+  期貨每口定額+保證金槓桿）、`portfolio_backtester.py`（**期貨護欄保留**，僅現貨）、
+  `walk_forward.py`、`optimizer.py`、`monte_carlo.py`、`run_*.py` 為各入口
 - 資料：`instruments.py`（Instrument 資產類別抽象 + registry，spec 008a）→
   `data_sources/`（可插拔來源 adapter：yfinance/csv/mock，rollover 由 adapter 自理）→
   `data_ingestion.py` → SQLite `trendpoint.db`（gitignored）；表名一律經
@@ -54,8 +56,10 @@ python monitor_signals.py --once   # 單次訊號檢測與推播
 - UI：`app.py`（Streamlit，禁止內嵌演算法邏輯）
 - 規格：`specs/001` 為 as-built 基準；`002`（FVG 確認）已併入 main；
   `007`（MSS fractal 反轉進場）長側已實作並併入 main（US1–US3，SC-003 未達成如實記錄），短側待 003；
-  `008a`（台指期資料層抽象）已併入 main；`003`（短側）2026-07-12 重開為**台指期限定**、
-  待 008b（成本/口數）；`004~006` 見各 spec.md 狀態。新功能走 Spec Kit：
+  `008a`（台指期資料層抽象）已併入 main；`008b`（期貨成本/口數，`specs/009-taifex-cost-model`）
+  已實作於 `009-taifex-cost-model` 分支——期貨單標的可交易回測（long-only），組合路徑護欄保留；
+  `003`（短側）2026-07-12 重開為**台指期限定**、008b 合併後解除阻塞；
+  `004~006` 見各 spec.md 狀態。新功能走 Spec Kit：
   `/speckit-specify` → `/speckit-plan` → `/speckit-tasks` → `/speckit-implement`
 - 理論：`three_bands_theory.md`、`docs/ladder-optimization-research.md`（階梯優化研究，
   原 docx 之正式版）；歷史文件：`TrendPoint_OpenSpec.md`（勿當現行規格）

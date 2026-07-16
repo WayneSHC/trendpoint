@@ -12,7 +12,10 @@ spec 008a US1 — 資料來源 adapter 介面契約與分派。
 import pandas as pd
 import pytest
 
-from instruments import Instrument, AssetClass
+from instruments import Instrument, AssetClass, ContractSpec
+# spec 008b：futures instrument 必帶 ContractSpec（TX 權威值 200/1/20）
+_C = ContractSpec(point_value=200.0, tick_size=1.0, exchange_fee_per_lot=20.0)
+
 from data_sources import get_adapter
 from data_sources.base import DataSourceAdapter
 
@@ -37,13 +40,13 @@ def test_get_adapter_dispatch_and_unknown_failfast():
 
 
 def test_mock_adapter_contract():
-    inst = Instrument(id="TXF", asset_class=AssetClass.FUTURES, source="mock")
+    inst = Instrument(id="TXF", asset_class=AssetClass.FUTURES, source="mock", contract=_C)
     df = get_adapter("mock").fetch(inst, "daily")
     _assert_ohlcv_contract(df)
 
 
 def test_mock_adapter_deterministic():
-    inst = Instrument(id="TXF", asset_class=AssetClass.FUTURES, source="mock")
+    inst = Instrument(id="TXF", asset_class=AssetClass.FUTURES, source="mock", contract=_C)
     a = get_adapter("mock")
     pd.testing.assert_frame_equal(a.fetch(inst, "daily"), a.fetch(inst, "daily"))
 
@@ -60,7 +63,7 @@ def test_csv_adapter_contract(tmp_path):
         "volume": [1000, 1100, 1200, 1300, 1400, 1500],
     }, index=idx)
     df0.to_csv(tmp_path / "AAA_daily.csv")
-    inst = Instrument(id="AAA", asset_class=AssetClass.FUTURES, source="csv")
+    inst = Instrument(id="AAA", asset_class=AssetClass.FUTURES, source="csv", contract=_C)
     out = CsvAdapter(base_dir=str(tmp_path)).fetch(inst, "daily")
     _assert_ohlcv_contract(out)
     assert len(out) == 6

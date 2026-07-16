@@ -388,3 +388,51 @@ def test_mss_future_bars_do_not_leak_into_signal():
     extended = _ohlcv_seq(highs, lows, closes, vols)
     mss_ext, _ = detect_market_structure(extended, period=5, swing_n=1, volume_mult=1.5)
     assert mss_ext.iloc[9] == mss_now.iloc[9], "bar9 的 MSS 因未來 K 線而改變——看前偏誤"
+
+
+# ---------------------------------------------------------------------------
+# spec 008b（SC-005 / FR-007）：期貨 sizing 與成交之看前偏誤防線
+# ---------------------------------------------------------------------------
+
+def _futures_run(df, initial_capital=10_000_000.0):
+    from acceptance_fixtures import make_klines  # noqa: F401（fixture 來源見 e2e）
+    from config.config import FuturesCostConfig
+    from instruments import ContractSpec
+    from trading_costs import FuturesCostModel, FuturesSizer
+    txc = ContractSpec(point_value=200.0, tick_size=1.0, exchange_fee_per_lot=20.0)
+    cfg = FuturesCostConfig()
+    return BacktestEngine(initial_capital=initial_capital).run_backtest(
+        df, asset_class="futures",
+        cost_model=FuturesCostModel(txc, cfg),
+        sizer=FuturesSizer(txc, cfg),
+        point_value=200.0, verbose=False,
+    )
+
+
+def test_futures_sizing_and_execution_no_lookahead():
+    """截斷第 N（進場）根之後的資料，不改變該根的口數決策與成交價；
+    成交發生於訊號次根開盤 + 滑價 tick（FR-007／憲章 I）。"""
+    from acceptance_fixtures import make_klines
+    df = make_klines(300, freq="5min")
+    full = _futures_run(df)
+    buys = full["trades"]
+    buys = buys[buys["action"] == "BUY"]
+    assert not buys.empty, "fixture 應觸發期貨進場"
+    first = buys.iloc[0]
+    k = df.index.get_loc(first["datetime"])  # 進場（成交）根位置
+
+    # (1) 成交於進場根開盤 + 1 tick 滑價（不利方向）
+    assert first["price"] == pytest.approx(float(df["open"].iloc[k]) + 1.0)
+
+    # (2) sizing 用訊號根（k−1）收盤價（保證金以訊號根名目值計）
+    assert first["sizing_price"] == pytest.approx(float(df["close"].iloc[k - 1]))
+
+    # (3) 末梢截斷不變性：只留到進場根為止的資料，進場決策（時間/口數/價格）完全相同
+    truncated = _futures_run(df.iloc[: k + 1])
+    tbuys = truncated["trades"]
+    tbuys = tbuys[tbuys["action"] == "BUY"]
+    assert not tbuys.empty, "截斷後進場應仍存在（決策只依賴過去資料）"
+    tfirst = tbuys.iloc[0]
+    assert tfirst["datetime"] == first["datetime"]
+    assert tfirst["shares"] == first["shares"]
+    assert tfirst["price"] == first["price"]

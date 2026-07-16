@@ -14,12 +14,13 @@ TrendPoint - 歷史回測執行與驗證腳本 (Run Backtest)
 
 import os
 import pandas as pd
-from backtester import BacktestEngine, assert_backtestable
+from backtester import BacktestEngine
 from config import load_config
 from db_security import safe_load_db_data, table_name_for
-from instruments import equity_instrument
+from instruments import AssetClass, equity_instrument
 from performance import format_performance_report
 from monte_carlo import bootstrap_trades, format_monte_carlo_report
+from trading_costs import for_asset_class
 
 def load_data_from_db(db_path: str, table_name: str) -> pd.DataFrame:
     """
@@ -62,12 +63,20 @@ def run():
         print(f"錯誤：找不到資料庫 {db_path}，請先執行 run_ingestion.py 下載數據。")
         return
         
-    # 動態設定回測標的與對應表名
+    # 動態設定回測標的與對應表名（spec 008b：現貨 tickers + 結構化期貨 instruments）
     test_cases = []
     for ticker in cfg.data.tickers:
+        inst = equity_instrument(ticker)
         test_cases.append({
             "ticker": ticker,
-            "table": table_name_for(equity_instrument(ticker), "daily")
+            "table": table_name_for(inst, "daily"),
+            "instrument": inst,
+        })
+    for inst in cfg.data.instruments:
+        test_cases.append({
+            "ticker": inst.id,
+            "table": table_name_for(inst, "daily"),
+            "instrument": inst,
         })
     
     # 建立回測引擎，直接傳入設定檔規格物件
@@ -85,16 +94,21 @@ def run():
                 continue
                 
             print(f"載入成功，共 {len(df)} 筆 K 線數據。")
-            
-            # spec 008a 護欄（入口層）：dispatch 前拒絕對期貨回測
-            instrument = equity_instrument(ticker)
-            assert_backtestable(instrument.asset_class)
+
+            # spec 008b：依資產類別分派成本/sizing 元件（現貨=現行語意、期貨=槓桿模型）；
+            # 008a 的單標的入口護欄已退役（組合路徑護欄保留，見 backtester.assert_backtestable）
+            instrument = case["instrument"]
+            cost_model, sizer = for_asset_class(instrument, cfg)
+            pv = instrument.contract.point_value if instrument.contract else 1.0
 
             # 執行回測，使用該標的專屬（或預設）的策略參數規格
             params = cfg.strategy.get_params_for_ticker(ticker)
             results = engine.run_backtest(
                 df=df,
                 asset_class=instrument.asset_class,
+                cost_model=cost_model,
+                sizer=sizer,
+                point_value=pv,
                 atr_period=params.atr_period,
                 k=params.ladder_k,
                 ch_period=params.chandelier_period,
@@ -118,9 +132,18 @@ def run():
             summary = results["summary"]
             df_equity = results["equity_curve"]
             df_trades = results["trades"]
-            
+
             # 顯示績效
             display_summary(ticker, summary)
+
+            # spec 008b：期貨附加資訊（口數/保證金/爆倉）
+            if instrument.asset_class == AssetClass.FUTURES:
+                buys = df_trades[df_trades["action"] == "BUY"] if not df_trades.empty else df_trades
+                if not buys.empty:
+                    print(f"  [期貨] 進場次數 {len(buys)}｜單次口數 max {buys['shares'].max():.0f}"
+                          f"｜佔用保證金 max {buys['margin_used'].max():,.0f} 元")
+                if summary.get("blown_up"):
+                    print("  ⚠ [期貨] 本回測觸發爆倉（權益 ≤ 0 強制結清並終止）——槓桿/使用率過高")
             
             # 持久化回測結果以供日後 UI 面板讀取
             clean_name = ticker.replace(".", "_")

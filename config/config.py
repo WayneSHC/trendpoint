@@ -158,6 +158,35 @@ class StrategyConfig(BaseModel):
         """
         return self.ticker_overrides.get(ticker, self.default)
 
+class FuturesCostConfig(BaseModel):
+    """
+    期貨帳戶/政策層成本與 sizing 參數（spec 008b）。
+
+    契約內生值（乘數/tick/交易所定額費）不在此——它們隨 instrument 的
+    `contract`（ContractSpec）走。此處僅放使用者政策與跨契約費率。
+    """
+    broker_commission_per_lot: float = Field(
+        default=0.0, ge=0.0,
+        description="券商加收每口每邊定額 NT$（0 = 僅 TAIFEX 權威費率，可調為實際券商數字）"
+    )
+    tax_rate: float = Field(
+        default=0.00002, ge=0.0,
+        description="期貨交易稅率（契約金額 ×，兩邊各收；台指類權威值十萬分之二）"
+    )
+    slippage_ticks: float = Field(
+        default=1.0, ge=0.0,
+        description="每邊滑價 tick 數（台指 1 tick = 1 點）"
+    )
+    margin_rate: float = Field(
+        default=0.055, gt=0.0, le=1.0,
+        description="每口保證金 = 名目值（點數×乘數）× 此值（台指歷史約 4-6%）"
+    )
+    margin_utilization: float = Field(
+        default=0.5, gt=0.0, le=1.0,
+        description="保證金使用率上限：口數 = floor(權益 × 此值 ÷ 每口保證金)"
+    )
+
+
 class TradingCostConfig(BaseModel):
     """
     交易摩擦摩擦成本設定
@@ -181,6 +210,10 @@ class TradingCostConfig(BaseModel):
         default=1000,
         ge=1,
         description="整股交易單位（台股一張為 1000 股）；買進股數會向下取整至此單位之倍數"
+    )
+    futures: FuturesCostConfig = Field(
+        default_factory=FuturesCostConfig,
+        description="期貨成本/口數政策（spec 008b）；預設齊全，既有 config 零改可載"
     )
 
 class PortfolioConfig(BaseModel):

@@ -9,6 +9,7 @@ data:
   - 00919.TW
   - 00631L.TW
   # spec 008a：結構化 instrument（期貨）。source=mock 供端到端驗證，來源後補。
+  # spec 008b：futures 必帶 contract（乘數/tick/交易所每口每邊定額費，TAIFEX 權威值）。
   instruments:
   - id: TXF
     asset_class: futures
@@ -16,6 +17,20 @@ data:
     display_name: 台指期近月（mock）
     timeframes:
     - daily
+    contract:
+      point_value: 200      # 大台每點 NT$200
+      tick_size: 1
+      exchange_fee_per_lot: 20     # 經手費 12 + 結算費 8（每口每邊）
+  - id: MTX
+    asset_class: futures
+    source: mock
+    display_name: 小型臺指近月（mock）
+    timeframes:
+    - daily
+    contract:
+      point_value: 50       # 小台每點 NT$50
+      tick_size: 1
+      exchange_fee_per_lot: 12.5   # 經手費 7.5 + 結算費 5（每口每邊）
 data_quality:
   max_close_jump_ratio: 3.0
 strategy:
@@ -67,3 +82,10 @@ trading_cost:
   commission_rate: 0.001425
   slip_rate: 0.0005
   tax_rate: 0.003
+  # spec 008b：期貨帳戶/政策層費率（契約內生值在 data.instruments 的 contract）
+  futures:
+    broker_commission_per_lot: 0   # 券商加收每口每邊；0 = 僅 TAIFEX 權威費率（可填實際券商數字）
+    tax_rate: 0.00002              # 期交稅/邊（十萬分之二，兩邊各收）
+    slippage_ticks: 1              # 每邊滑價 tick 數（1 tick = 1 點）
+    margin_rate: 0.055             # 每口保證金 = 名目值 × 此值（歷史約 4-6%）
+    margin_utilization: 0.5        # 口數 = floor(權益 × 此值 ÷ 每口保證金)

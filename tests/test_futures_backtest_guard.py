@@ -3,34 +3,35 @@
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 """
-spec 008a US3 — 期貨回測雙層 fail-fast 護欄（SC-004）。
+spec 008b US1 — 護欄語意反轉（SC-006，原 008a US3 護欄之退役）。
 
-引擎層（BacktestEngine.run_backtest 的 asset_class 護欄）與入口/引擎方法對
-futures instrument 皆拋明確錯誤、零績效數字；equity 正常回測不受影響。
+單標的路徑（BacktestEngine.run_backtest）對 futures **不再拋錯**（008b 已有成本/口數模型）；
+**組合路徑護欄保留**（008b analyze H1：組合的期貨元件接入不在範圍，放行會使期貨
+落入現股成本路徑、違反憲章 II）；equity 預設路徑不受影響。
 """
 
 import pytest
 
 from acceptance_fixtures import make_klines
 from backtester import BacktestEngine, assert_backtestable, FuturesBacktestNotSupportedError
-from instruments import AssetClass
+from config.config import FuturesCostConfig
+from instruments import AssetClass, ContractSpec
+from trading_costs import FuturesCostModel, FuturesSizer
+
+_TXC = ContractSpec(point_value=200.0, tick_size=1.0, exchange_fee_per_lot=20.0)
 
 
-def test_assert_backtestable_rejects_futures_and_allows_equity():
-    with pytest.raises(FuturesBacktestNotSupportedError):
-        assert_backtestable("futures")
-    with pytest.raises(FuturesBacktestNotSupportedError):
-        assert_backtestable(AssetClass.FUTURES)
-    # equity 不拋（字串與 enum 皆可）
-    assert_backtestable("equity")
-    assert_backtestable(AssetClass.EQUITY)
-
-
-def test_engine_guard_rejects_futures():
+def test_engine_no_longer_rejects_futures():
+    """008b：引擎對 futures 正常回測（提供期貨元件時）。"""
     df = make_klines(300, freq="5min")
-    eng = BacktestEngine()
-    with pytest.raises(FuturesBacktestNotSupportedError):
-        eng.run_backtest(df, asset_class="futures", verbose=False)
+    cfg = FuturesCostConfig()
+    res = BacktestEngine().run_backtest(
+        df, asset_class="futures",
+        cost_model=FuturesCostModel(_TXC, cfg),
+        sizer=FuturesSizer(_TXC, cfg),
+        point_value=_TXC.point_value, verbose=False,
+    )
+    assert "summary" in res and "trades" in res
 
 
 def test_engine_equity_default_unaffected():
@@ -39,7 +40,18 @@ def test_engine_equity_default_unaffected():
     assert "summary" in res and "trades" in res
 
 
-def test_portfolio_engine_guard_rejects_futures():
+def test_assert_backtestable_still_rejects_for_portfolio_boundary():
+    """assert_backtestable 函式保留拒絕語意——組合入口仍靠它擋期貨（H1 範圍護欄）。"""
+    with pytest.raises(FuturesBacktestNotSupportedError):
+        assert_backtestable("futures")
+    with pytest.raises(FuturesBacktestNotSupportedError):
+        assert_backtestable(AssetClass.FUTURES)
+    assert_backtestable("equity")
+    assert_backtestable(AssetClass.EQUITY)
+
+
+def test_portfolio_engine_still_rejects_futures():
+    """組合引擎層護欄保留：期貨進組合 → 拋錯（期貨組合接入待後續 spec）。"""
     from portfolio_backtester import PortfolioBacktester
     pb = PortfolioBacktester()
     pb.tickers = ["TXF"]  # config.instruments 內的 futures instrument
