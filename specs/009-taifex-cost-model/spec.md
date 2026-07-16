@@ -4,7 +4,7 @@
 
 **Created**: 2026-07-16
 
-**Status**: Draft
+**Status**: Implemented（2026-07-16，`009-taifex-cost-model` 分支；SC-001~007 全數達成）
 
 **Input**: User description: "在 008a 資料層抽象之上，為台指期（TXF 大台、MTX 小台、TMF 微台）建立可交易回測所需的真實每口摩擦成本與槓桿部位 sizing 模型，退役 008a 的期貨回測護欄，使期貨可 long-only 回測。做空保留給 spec 003。此即 spec 003 重啟條件所指的『成本模型（保證金／期貨稅率）』。"
 

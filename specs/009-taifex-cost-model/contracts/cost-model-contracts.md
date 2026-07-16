@@ -8,17 +8,26 @@
 每筆**成交**（一邊）的摩擦成本計算。純函式、無狀態、O(1)。
 
 ```python
+class TradeCosts(NamedTuple):        # as-built 精修：float → 明細（交易日誌需分列 commission/tax）
+    commission: float                # 手續費（現股=比例；期貨=交易所定額+券商加收）
+    tax: float                       # 稅（現股=證交稅僅賣邊；期貨=期交稅兩邊）
+    # .total property = commission + tax
+
 class CostModel(ABC):
     @abstractmethod
-    def entry_cost(self, price: float, units: float) -> float: ...
-        # 買/開倉邊總摩擦成本（NT$）。price 為成交價（滑價後）。
+    def entry_costs(self, price: float, units: float) -> TradeCosts: ...
+        # 買/開倉邊摩擦成本明細。price 為成交價（滑價後）。
     @abstractmethod
-    def exit_cost(self, price: float, units: float) -> float: ...
-        # 賣/平倉邊總摩擦成本（NT$）。
+    def exit_costs(self, price: float, units: float) -> TradeCosts: ...
+        # 賣/平倉邊摩擦成本明細。
     @abstractmethod
     def slip(self, raw_price: float, side: str) -> float: ...
         # 回傳滑價後成交價；side ∈ {"buy","sell"}，方向恆不利。
 ```
+
+> **as-built 註記**：原契約 `entry_cost/exit_cost -> float` 於實作時精修為
+> `entry_costs/exit_costs -> TradeCosts`——引擎交易日誌與績效配對需要 commission/tax
+> 分列（現股位元 parity 依賴逐欄位一致），總額由 `.total` 取得。語意不變、粒度更細。
 
 **EquityCostModel（現況逐字重現，FR-009）**
 - `slip`: buy → `raw × (1 + slip_rate)`；sell → `raw × (1 − slip_rate)`（同 backtester.py:232,294,323 現行為）
