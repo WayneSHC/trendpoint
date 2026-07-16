@@ -61,11 +61,15 @@
 | `close` | `2C − close` |
 | `volume` | 不變 |
 
-**對稱斷言**：原序列（`enable_short=false`）之多方訊號/進場/出場序列，與翻轉
-序列（`enable_short=true`、多方閘門對稱存在）之空方序列一一對應：
-進出場根相同、口數規則對應、事件類型鏡像（BUY↔SELL_SHORT、SELL_HALF↔COVER_HALF、
-SELL_ALL↔COVER_ALL、止損/吊燈/時間事件同類）。衍生指標（ATR、振幅、ADX、ER、
-量能）在翻轉下不變或對稱；`daily_open`/`vwap`/`mid_price`/`ladder` 隨價格翻轉。
+**對稱斷言**（analyze H1 修訂——**常數口隔離**）：鏡像變換測試以**常數 1 口 sizer**
+注入兩側（隔離價格水位效應：保證金口數 = f(權益, 價格) 與期交稅 = 名目×稅率
+皆依價格而變，翻轉後價格不同 → 口數/成本數字**本就不應**一一對應）。斷言範圍 =
+**訊號與部位管理層**：原序列多方之進出場**根位**相同、事件類型鏡像
+（BUY↔SELL_SHORT、SELL_HALF↔COVER_HALF、SELL_ALL↔COVER_ALL、止損/吊燈/時間
+事件同類）。sizing/成本層之對稱由單元測試獨立覆蓋（sizer 無方向、成本公式兩邊同式）。
+衍生指標鏈在翻轉下不變或對稱（驗算：TR/ATR/振幅/ADX 強度/ER/量能不變；
+MA/VWAP/daily_open/mid_price/ladder 隨價格翻轉；`chandelier_long'` = 2C −
+`chandelier_short`——完美鏡像對）。
 
 ## 空方市況濾網（regime）
 

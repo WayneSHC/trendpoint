@@ -65,14 +65,17 @@ tests/test_lookahead_bias.py` 綠。
   direction=-1 各維度鏡像真值表 + direction=1 與現行輸出位元 parity；manage_position
   空方手工情境對（止損上穿、階段 1 目標達成、吊燈只降不升、chandelier_short 缺失
   fail-fast）（SC-002b 部分）
-- [ ] T007 [P] [US1] `tests/test_short_side.py`：數值鏡像變換全鏈測試（SC-002a）——
-  `make_klines` 翻轉（p'=2C−p、high↔low 對調、量能不變；映射定義見 data-model.md），
-  原序列多方回測（期貨元件）之交易序列與翻轉序列空方回測（enable_short）一一對應
-  （根位、事件鏡像 BUY↔SELL_SHORT 等、口數規則）
-- [ ] T008 [P] [US1] `tests/test_short_futures_e2e.py`：空方 e2e——含下跌段期貨序列 +
-  enable_short → ≥1 筆 SELL_SHORT→COVER_ALL、成本非零兩邊、口數非負整數、無借券
-  欄位、確定性（SC-001）；空方爆倉——進場後嫁接 +10%/根急漲 → 權益 ≤ 0 當根強制
-  回補、曲線截止、summary 標記（SC-006，鏡像 008b 爆倉 fixture 手法）
+- [ ] T007 [P] [US1] `tests/test_short_side.py`：數值鏡像變換全鏈測試（SC-002a，
+  analyze H1 修訂）——`make_klines` 翻轉（p'=2C−p、high↔low 對調、量能不變；映射
+  見 data-model.md），**兩側皆注入常數 1 口 sizer**（隔離價格水位效應：保證金口數
+  與稅額依價格而變、翻轉後不對應），斷言原序列多方與翻轉序列空方（enable_short +
+  mss_reversal_entry 兩邊同參數）之進出場**根位相同、事件類型鏡像**
+  （BUY↔SELL_SHORT、SELL_HALF↔COVER_HALF、SELL_ALL↔COVER_ALL）
+- [ ] T008 [P] [US1] `tests/test_short_futures_e2e.py`：空方 e2e——fixture 用
+  **翻轉之 make_klines 序列**（analyze M2：對稱成立則必觸發空方進場，自足且確定）+
+  enable_short + margin sizer → ≥1 筆 SELL_SHORT→COVER_ALL、成本非零兩邊、口數非負
+  整數、無借券欄位、確定性（SC-001）；空方爆倉——進場後嫁接 +10%/根急漲 → 權益 ≤ 0
+  當根強制回補、曲線截止、summary 標記（SC-006，鏡像 008b 爆倉 fixture 手法）
 - [ ] T009 [P] [US1] `tests/test_lookahead_bias.py` 擴充：空方防線——截斷不變性（進場
   根後截斷不改變 SELL_SHORT 時間/口數/價格）、成交 = N+1 開盤 − 滑價 tick（賣出開倉
   不利向下）、sizing 用訊號根收盤權益（SC-005）
@@ -84,7 +87,8 @@ tests/test_lookahead_bias.py` 綠。
   【global = close<mid AND regime_ok_short】→ 未進場則 MSS==−1 反轉【AND
   mss_reversal_entry；鏡像 profile：放寬 trend、global=close<mid、免 regime】）；
   SELL_SHORT 成交 `cost_model.slip(open,"sell")`、sizing 同 008b、pm.direction=-1、
-  止損 = entry + 2×ATR、SELL_SHORT 紀錄（含 point_value/sizing_price/margin_used）
+  止損 = entry + 2×ATR、SELL_SHORT 紀錄（含 point_value/sizing_price/margin_used）；
+  順手更新 backtester.py:227 之 BLOCKED-003 註解（analyze L1）
 - [ ] T011 [US1] `backtester.py` 方向因子會計：持倉管理呼叫傳 chandelier_short；
   COVER_HALF（`sizer.partial_units` floor、0 口跳過但保本照移）/COVER_ALL 動作
   （回補 slip(open,"buy") 不利向上）；realized/unrealized = d×units×Δ×pv；爆倉檢查
