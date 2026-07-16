@@ -80,9 +80,11 @@ def for_asset_class(instrument, config) -> tuple[CostModel, PositionSizer]:
 - 權益 mark-to-market、爆倉檢查（FR-011）：每根收盤後檢查權益 ≤ 0 → 當根價強制結清、
   截止曲線、`summary["blown_up"] = True`（現股數學上不會觸發——無槓桿且 long-only，
   但檢查為資產類別無關之通用防護）。
-- 008a 護欄退役: 引擎/入口不再對 futures 呼叫 `assert_backtestable` 拒絕；函式與
-  `FuturesBacktestNotSupportedError` 定義保留（import 相容），語意改為 no-op 或移除呼叫點
-  （`test_futures_backtest_guard.py` 隨之語意反轉改寫，SC-006）。
+- 008a 護欄退役（**僅單標的路徑**）: `backtester.py` 引擎與 `run_backtest.py` 入口不再對
+  futures 拒絕；函式與 `FuturesBacktestNotSupportedError` 定義保留（import 相容）。
+  **組合路徑護欄保留**（`run_portfolio_backtest.py`、`portfolio_backtester.py`）——組合期貨
+  接入不在本 spec，放行將落入現股成本路徑（憲章 II）。`test_futures_backtest_guard.py`
+  語意反轉改寫、保留組合拒絕斷言（SC-006）。
 - 監控/推播、walk-forward、optimizer 對期貨**不在本 spec**——僅 `run_backtest.py`
   入口 + 引擎層接期貨（spec Assumptions 範圍邊界）。
 

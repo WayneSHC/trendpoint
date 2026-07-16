@@ -92,7 +92,7 @@
 - **FR-005**: 口數 MUST = floor(可用權益 × 保證金使用率 ÷ 每口保證金)，為非負整數；口數 0 時不進場。
 - **FR-006**: 期貨損益 MUST 以「口數 × 點數變化 × 每點價值 − 摩擦成本」計入帳戶權益；報酬率 = 期末權益 ÷ 期初權益 − 1；與現貨共用同一初始資金基底。
 - **FR-007**: 口數 sizing MUST 只使用訊號根（第 N 根）收盤時已知之權益；成交於第 N+1 根開盤（憲章 I）；新期貨路徑 MUST 在 `tests/test_lookahead_bias.py` 增加防禦測試。
-- **FR-008**: 008a 之期貨回測拒絕護欄 MUST 退役：對期貨 instrument 回測不再拋 `FuturesBacktestNotSupportedError`；本 spec 範圍內期貨僅做多（回測紀錄不得出現空單；做空為 spec 003）。
+- **FR-008**: 008a 之期貨回測拒絕護欄 MUST 於**單標的路徑**退役（引擎層 + `run_backtest.py` 入口）：對期貨 instrument 回測不再拋 `FuturesBacktestNotSupportedError`。**組合回測路徑之護欄 MUST 保留**（組合的期貨元件接入不在本 spec 範圍，放行將使期貨掉入現股成本路徑、違反憲章 II）。本 spec 範圍內期貨僅做多（回測紀錄不得出現空單；做空為 spec 003）。
 - **FR-009**: 現貨回測路徑 MUST 位元不變：既有成本語意（手續費兩邊、證交稅僅賣邊、比例滑價）、整張 sizing、全部績效數字與現行完全相同。
 - **FR-010**: 引擎 MUST 以可替換的成本／sizing／契約元件按資產類別組裝（現貨元件精確重現現況、期貨元件實作本 spec 模型），共用逐根迴圈、訊號與出場邏輯；每條 Success Criterion MUST 對應至少一個自動化測試（憲章 III）。
 - **FR-011**: 爆倉防護：權益 ≤ 0 當根 MUST 以當根價強制結清並終止模擬，權益曲線截止於該根，summary 如實標記爆倉。
@@ -115,7 +115,7 @@
 - **SC-003（保證金/口數正確）**: 單元測試驗證每口保證金公式與口數 floor 公式（含權益不足 → 0 口、TMF 小口值）。
 - **SC-004（期貨端到端）**: mock TXF 與 MTX 資料 → 回測跑通、總摩擦成本 > 0、全程口數為非負整數、權益曲線無 NaN、無空單。
 - **SC-005（看前偏誤防線）**: `tests/test_lookahead_bias.py` 新增測試證明：截斷訊號根之後的資料不改變該根的 sizing 決策與成交價；期貨成交於訊號次根開盤。
-- **SC-006（護欄退役）**: 對期貨 instrument 回測不拋 `FuturesBacktestNotSupportedError`；現貨路徑（預設）行為不受影響。
+- **SC-006（護欄退役）**: 單標的路徑對期貨 instrument 回測不拋 `FuturesBacktestNotSupportedError`；**組合路徑對期貨仍拋錯**（範圍邊界護欄）；現貨路徑（預設）行為不受影響。
 - **SC-007（費率 SoT）**: 引擎與腳本原始碼中無硬編碼期貨費率／保證金常數（grep 稽核）；全部經 config + Pydantic 取得。
 
 ## Assumptions

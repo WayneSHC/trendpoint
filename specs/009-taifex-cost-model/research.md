@@ -77,8 +77,9 @@
 
 - **Decision**: `run_backtest(...)` 新增可選元件參數（或 instrument 參數→內部工廠解析），
   **預設值 = 現股元件**；既有呼叫（含全部既有測試）零改動即走現股路徑。
-  期貨由入口腳本顯式傳入。008a `assert_backtestable` 護欄改為放行 futures
-  （函式保留、`FuturesBacktestNotSupportedError` 保留定義以免 import 斷裂，引擎不再呼叫拒絕）。
+  期貨由入口腳本顯式傳入。008a `assert_backtestable` 護欄於**單標的路徑**放行 futures
+  （函式保留、`FuturesBacktestNotSupportedError` 保留定義以免 import 斷裂，引擎不再呼叫拒絕）；
+  **組合路徑護欄保留**（analyze H1：組合期貨接入不在本 spec，放行將落入現股成本路徑違反憲章 II）。
 - **Rationale**: parity 最大保護——現股 code path 預設完全不變；期貨是顯式 opt-in；
   護欄退役採最小破壞（`test_futures_backtest_guard.py` 語意反轉改寫）。
 - **Alternatives considered**: 強制所有呼叫端傳 instrument（觸碰面大、與 parity 目標衝突）；
