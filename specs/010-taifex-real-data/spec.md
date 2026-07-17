@@ -13,6 +13,12 @@
 > 官方 OpenAPI 僅提供最近一交易日（適合增量、不能回填）。Yahoo/yfinance **無**台指期貨
 > 代碼（`TXF=F` 不存在）。FinMind 為同源清洗鏡像（1998 起、token 600 req/hr）。
 
+## Clarifications
+
+### Session 2026-07-17
+
+- Q: 歷史回填預設抓多深？ → A: 全歷史（1998-07-21 TX 上市日起）——一次到位（~340 請求 ≈ 12 分鐘、幾 MB），涵蓋完整多空循環；`backfill_start` config 可調。
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - 真實台指期資料端到端（Priority: P1）🎯 MVP
@@ -105,7 +111,7 @@ mock 驗證層；002/007 的 FVG/MSS 懸案（SC-003 資料相依）也需要真
 - **FR-005**: 連續序列 MUST 存入既有期貨日線表（消費端——回測、監控、UI——零程式修改）；每次新轉倉觸發全歷史重算與整表覆蓋；連續序列 MUST 通過資料品質契約（時間嚴格遞增、無缺值、欄位完整；正價檢查對 back-adjust 序列放寬為有限數值）。
 - **FR-006**: 系統 MUST 提供 FinMind 驗證源（同資料介面抽象；憑證走環境變數【安全鐵律】，不入 config 檔）。
 - **FR-007**: 交叉驗證 MUST 為獨立步驟：對重疊區間逐日比對兩源原始契約列（開高低收/結算價/成交量），容差（config）內通過、超差列產出告警報表；驗證不阻塞入庫；驗證源不可用時跳過並如實記錄。
-- **FR-008**: 組態 MUST 集中（憲章 V）：TXF instrument 之 source 切換為真源；容差、節流間隔、重試次數、回填起始等參數走 config + Pydantic 驗證；MTX 暫留 mock（真源接入僅需改 instrument 宣告，屬後續加法）。
+- **FR-008**: 組態 MUST 集中（憲章 V）：TXF instrument 之 source 切換為真源；容差、節流間隔、重試次數、回填起始（`backfill_start` **預設 1998-07-21 全歷史**，clarify 定案）等參數走 config + Pydantic 驗證；MTX 暫留 mock（真源接入僅需改 instrument 宣告，屬後續加法）。
 - **FR-009**: 可重現性 MUST 保障（憲章 VI）：回填入庫後回測/監控完全離線；解析與拼接之單元測試用固定離線樣本（真實資料截取之 fixture）；需網路之端到端測試以專用標記隔離、預設跳過（CI 不對外部服務發請求）。
 - **FR-010**: mock 與 csv adapter MUST 保留（測試/開發用途）；既有 mock 路徑測試行為不變。
 - **FR-011**: 每條 Success Criterion MUST 對應至少一個自動化測試（憲章 III；network 標記之測試除 CI 外可手動執行驗收）。
