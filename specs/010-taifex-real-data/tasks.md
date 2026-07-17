@@ -51,11 +51,11 @@ US1（TAIFEX 端到端 + 消費端切換）；US3（FinMind + 交叉驗證）。
 
 **Independent Test**: `pytest tests/test_rollover.py` 綠（全離線錨定例）。
 
-- [ ] T006 [P] [US2] `tests/test_rollover.py`（先寫先 FAIL）：手造 3 契約量序列錨定例——
+- [x] T006 [P] [US2] `tests/test_rollover.py`（先寫先 FAIL）：手造 3 契約量序列錨定例——
   交叉日 k（k−1 日量判定）→ k 日起換月；單向不回切（量回落）；back-adjust 平移數字
   手算（差額 = 新舊契約 k−1 收盤差、累積平移、Δclose 逐日等於同契約真實變動）；
   截斷不變性（近月選擇序列）；首日初始化（當日量最大）
-- [ ] T007 [US2] `data_sources/rollover.py`：`select_front_month` / `compute_roll_events` /
+- [x] T007 [US2] `data_sources/rollover.py`：`select_front_month` / `compute_roll_events` /
   `build_continuous`（契約見 contracts；純函式、向量化、MPL-2.0 標頭）
 
 **Checkpoint**: SC-002 達成。
