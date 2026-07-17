@@ -21,9 +21,9 @@ US1（TAIFEX 端到端 + 消費端切換）；US3（FinMind + 交叉驗證）。
 
 ## Phase 1: Setup
 
-- [ ] T001 [P] 基線確認：`pytest -q` 全綠（154）；`pytest.ini` 註冊 `network` marker 並於
+- [x] T001 [P] 基線確認：`pytest -q` 全綠（154）；`pytest.ini` 註冊 `network` marker 並於
   addopts 預設排除（`-m "not network"`），驗證既有測試數不變
-- [ ] T002 [P] 取得離線 fixtures（一次性網路）：TAIFEX `futDataDown` 一個月真實 Big5 CSV
+- [x] T002 [P] 取得離線 fixtures（一次性網路）：TAIFEX `futDataDown` 一個月真實 Big5 CSV
   截樣 → `tests/fixtures/taifex_sample_big5.csv`；FinMind `TaiwanFuturesDaily` 同區間
   JSON 截樣 → `tests/fixtures/finmind_sample.json`（此後解析測試全離線）
 
@@ -31,14 +31,14 @@ US1（TAIFEX 端到端 + 消費端切換）；US3（FinMind + 交叉驗證）。
 
 ## Phase 2: Foundational（阻塞性前置）
 
-- [ ] T003 `config/config.py`：`FuturesDataSourceConfig`（backfill_start="1998-07-21"、
+- [x] T003 `config/config.py`：`FuturesDataSourceConfig`（backfill_start="1998-07-21"、
   throttle_seconds=2.0、max_retries=3、verify_tolerance=0.0，驗證界線見 data-model）掛
   `DataConfig.futures_source`（預設齊全零改相容）；`config.yaml` 加 `data.futures_source`
   區塊（**TXF source 此階段暫不切**，切換點在 T012）
-- [ ] T004 `db_security.py`：`raw_table_name_for(instrument, timeframe)` →
+- [x] T004 `db_security.py`：`raw_table_name_for(instrument, timeframe)` →
   `fut_{clean_id}_raw_{tf}`（現行 regex 已容納、零 regex 改動）；equity → ValueError；
   附單元測試（併入 tests/test_table_naming.py）
-- [ ] T005 `data_ingestion.py`：`validate_data_contract` 對**期貨連續序列**放寬正價檢查為
+- [x] T005 `data_ingestion.py`：`validate_data_contract` 對**期貨連續序列**放寬正價檢查為
   「有限數值」（raw 層與現貨不動；參數化或依旗標，D8）；既有測試全綠
 
 **Checkpoint**: `pytest -q` 綠（行為零變）。

@@ -45,6 +45,19 @@ def table_name_for(instrument, timeframe: str) -> str:
     validate_table_name(name)
     return name
 
+def raw_table_name_for(instrument, timeframe: str) -> str:
+    """
+    期貨**原始按契約月份**資料之表名導出（spec 010）：`fut_{clean_id}_raw_{tf}`。
+    現行 TABLE_NAME_PATTERN 中段已容納底線——零 regex 改動。
+    僅期貨有 raw 層（現貨無契約月份概念）→ equity fail-fast。
+    """
+    if getattr(instrument, "asset_class", "equity") != "futures":
+        raise ValueError(f"raw 層僅期貨適用：'{instrument.id}' 非 futures instrument")
+    name = f"fut_{_clean_id(instrument.id)}_raw_{timeframe}"
+    validate_table_name(name)
+    return name
+
+
 def safe_load_db_data(db_path: str, table_name: str) -> pd.DataFrame:
     """
     具備 SQL 注入防護的 SQLite 資料載入函數。

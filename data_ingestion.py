@@ -14,6 +14,7 @@ TrendPoint - 數據收集與清洗模組 (Data Ingestion Module)
 import logging
 import os
 import sqlite3
+import numpy as np
 import pandas as pd
 import yfinance as yf
 from security_utils import rate_limiter
@@ -99,7 +100,8 @@ def clean_kline_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
     return cleaned_df
 
-def validate_data_contract(df: pd.DataFrame, *, quality=None, asset_class="equity") -> bool:
+def validate_data_contract(df: pd.DataFrame, *, quality=None, asset_class="equity",
+                           allow_nonpositive_prices: bool = False) -> bool:
     """
     驗證資料是否符合時序資料合約規格 (Data Contract Spec)
     - 必須包含 datetime 索引 (DatetimeIndex)
@@ -133,9 +135,17 @@ def validate_data_contract(df: pd.DataFrame, *, quality=None, asset_class="equit
     if df[list(required_cols)].isnull().any().any():
         raise ValueError("資料合約驗證失敗：資料中包含 NaN 缺失值")
 
-    # 4. 驗證數值範圍：價格須為正（0 視為資料錯誤），成交量允許 0 但不可為負
+    # 4. 驗證數值範圍：價格須為正（0 視為資料錯誤），成交量允許 0 但不可為負。
+    # spec 010（D8）：back-adjust 連續期貨序列經回溯平移、早期絕對價可能 ≤ 0（無害，
+    # 系統僅消費相對變化）——呼叫端以 allow_nonpositive_prices=True 放寬為「有限數值」；
+    # 現貨與期貨 raw 層維持正價檢查。
     price_cols = ["open", "high", "low", "close"]
     for col in price_cols:
+        if allow_nonpositive_prices:
+            bad = ~np.isfinite(df[col])
+            if bad.any():
+                raise ValueError(f"資料合約驗證失敗：欄位 {col} 包含非有限數值（NaN/inf）")
+            continue
         bad = df[col] <= 0.0
         if bad.any():
             ts = df.index[bad][0]
