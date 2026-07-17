@@ -436,3 +436,52 @@ def test_futures_sizing_and_execution_no_lookahead():
     assert tfirst["datetime"] == first["datetime"]
     assert tfirst["shares"] == first["shares"]
     assert tfirst["price"] == first["price"]
+
+
+# ---------------------------------------------------------------------------
+# spec 003（SC-005 / FR-007）：空方進場之看前偏誤防線
+# ---------------------------------------------------------------------------
+
+def test_short_entry_sizing_and_execution_no_lookahead():
+    """空方鏡像防線：截斷進場根之後資料不改變 SELL_SHORT 決策；
+    成交 = N+1 開盤 − 滑價 tick（賣出開倉不利向下）；sizing 用訊號根收盤。"""
+    from acceptance_fixtures import make_klines
+    from config.config import FuturesCostConfig
+    from instruments import ContractSpec
+    from trading_costs import FuturesCostModel, FuturesSizer
+    from test_short_side import mirror_klines
+
+    txc = ContractSpec(point_value=200.0, tick_size=1.0, exchange_fee_per_lot=20.0)
+    cfg = FuturesCostConfig()
+
+    def run_short(d):
+        return BacktestEngine(initial_capital=10_000_000.0).run_backtest(
+            d, asset_class="futures",
+            cost_model=FuturesCostModel(txc, cfg),
+            sizer=FuturesSizer(txc, cfg),
+            point_value=200.0, enable_short=True, verbose=False,
+        )
+
+    df = mirror_klines(make_klines(300, freq="5min"))
+    full = run_short(df)
+    shorts = full["trades"]
+    shorts = shorts[shorts["action"] == "SELL_SHORT"]
+    assert not shorts.empty, "翻轉 fixture 應觸發空方進場"
+    first = shorts.iloc[0]
+    k = df.index.get_loc(first["datetime"])
+
+    # (1) 成交於進場根開盤 − 1 tick（賣出開倉之不利偏移）
+    assert first["price"] == pytest.approx(float(df["open"].iloc[k]) - 1.0)
+
+    # (2) sizing 用訊號根（k−1）收盤價
+    assert first["sizing_price"] == pytest.approx(float(df["close"].iloc[k - 1]))
+
+    # (3) 末梢截斷不變性
+    truncated = run_short(df.iloc[: k + 1])
+    tshorts = truncated["trades"]
+    tshorts = tshorts[tshorts["action"] == "SELL_SHORT"]
+    assert not tshorts.empty
+    tfirst = tshorts.iloc[0]
+    assert tfirst["datetime"] == first["datetime"]
+    assert tfirst["shares"] == first["shares"]
+    assert tfirst["price"] == first["price"]

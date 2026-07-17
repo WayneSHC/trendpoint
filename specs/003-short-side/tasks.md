@@ -61,40 +61,40 @@ tests/test_lookahead_bias.py` 綠。
 
 ### Tests for User Story 1 ⚠️（先寫，先 FAIL）
 
-- [ ] T006 [P] [US1] `tests/test_short_side.py`：原語單元——check_entry_signal
+- [x] T006 [P] [US1] `tests/test_short_side.py`：原語單元——check_entry_signal
   direction=-1 各維度鏡像真值表 + direction=1 與現行輸出位元 parity；manage_position
   空方手工情境對（止損上穿、階段 1 目標達成、吊燈只降不升、chandelier_short 缺失
   fail-fast）（SC-002b 部分）
-- [ ] T007 [P] [US1] `tests/test_short_side.py`：數值鏡像變換全鏈測試（SC-002a，
+- [x] T007 [P] [US1] `tests/test_short_side.py`：數值鏡像變換全鏈測試（SC-002a，
   analyze H1 修訂）——`make_klines` 翻轉（p'=2C−p、high↔low 對調、量能不變；映射
   見 data-model.md），**兩側皆注入常數 1 口 sizer**（隔離價格水位效應：保證金口數
   與稅額依價格而變、翻轉後不對應），斷言原序列多方與翻轉序列空方（enable_short +
   mss_reversal_entry 兩邊同參數）之進出場**根位相同、事件類型鏡像**
   （BUY↔SELL_SHORT、SELL_HALF↔COVER_HALF、SELL_ALL↔COVER_ALL）
-- [ ] T008 [P] [US1] `tests/test_short_futures_e2e.py`：空方 e2e——fixture 用
+- [x] T008 [P] [US1] `tests/test_short_futures_e2e.py`：空方 e2e——fixture 用
   **翻轉之 make_klines 序列**（analyze M2：對稱成立則必觸發空方進場，自足且確定）+
   enable_short + margin sizer → ≥1 筆 SELL_SHORT→COVER_ALL、成本非零兩邊、口數非負
   整數、無借券欄位、確定性（SC-001）；空方爆倉——進場後嫁接 +10%/根急漲 → 權益 ≤ 0
   當根強制回補、曲線截止、summary 標記（SC-006，鏡像 008b 爆倉 fixture 手法）
-- [ ] T009 [P] [US1] `tests/test_lookahead_bias.py` 擴充：空方防線——截斷不變性（進場
+- [x] T009 [P] [US1] `tests/test_lookahead_bias.py` 擴充：空方防線——截斷不變性（進場
   根後截斷不改變 SELL_SHORT 時間/口數/價格）、成交 = N+1 開盤 − 滑價 tick（賣出開倉
   不利向下）、sizing 用訊號根收盤權益（SC-005）
 
 ### Implementation for User Story 1
 
-- [ ] T010 [US1] `backtester.py` 空方進場分支：flat 時三關價裁決（close>mid → 既有多方
+- [x] T010 [US1] `backtester.py` 空方進場分支：flat 時三關價裁決（close>mid → 既有多方
   分支**逐字不動**；close<mid 且 `enable_short and is_futures` → 空方：BOS==−1 續勢
   【global = close<mid AND regime_ok_short】→ 未進場則 MSS==−1 反轉【AND
   mss_reversal_entry；鏡像 profile：放寬 trend、global=close<mid、免 regime】）；
   SELL_SHORT 成交 `cost_model.slip(open,"sell")`、sizing 同 008b、pm.direction=-1、
   止損 = entry + 2×ATR、SELL_SHORT 紀錄（含 point_value/sizing_price/margin_used）；
   順手更新 backtester.py:227 之 BLOCKED-003 註解（analyze L1）
-- [ ] T011 [US1] `backtester.py` 方向因子會計：持倉管理呼叫傳 chandelier_short；
+- [x] T011 [US1] `backtester.py` 方向因子會計：持倉管理呼叫傳 chandelier_short；
   COVER_HALF（`sizer.partial_units` floor、0 口跳過但保本照移）/COVER_ALL 動作
   （回補 slip(open,"buy") 不利向上）；realized/unrealized = d×units×Δ×pv；爆倉檢查
   方向化（空方上漲觸發、強制回補 COVER_ALL）；`_calculate_metrics` 增空方配對
   （SELL_SHORT→COVER_ALL + COVER_HALF 中途，profit 含方向因子），**多方配對段逐字不動**
-- [ ] T012 [US1] `run_backtest.py`：`params.enable_short` 穿線至 `engine.run_backtest`
+- [x] T012 [US1] `run_backtest.py`：`params.enable_short` 穿線至 `engine.run_backtest`
   （config 預設 false → 行為不變；期貨開啟示例入 config.yaml 註解）
 
 **Checkpoint**: US1 完成 → SC-001/002/005/006 + SC-007（007 短腿實際可觸發）。
@@ -107,7 +107,7 @@ tests/test_lookahead_bias.py` 綠。
 
 **Independent Test**: 全套 pytest + 基準數字對照。
 
-- [ ] T013 [US2] 回歸驗證：全套 `pytest -q` 綠 + `python run_backtest.py` 現貨 5 檔與
+- [x] T013 [US2] 回歸驗證：全套 `pytest -q` 綠 + `python run_backtest.py` 現貨 5 檔與
   期貨 long-only 2 檔數字與 `baseline-check.md`（T001）逐位元相同（**SC-003 硬關卡**）；
   任何 diff → 修正至歸零
 

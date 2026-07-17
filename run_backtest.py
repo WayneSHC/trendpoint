@@ -126,7 +126,8 @@ def run():
                 fvg_lookback=params.fvg_lookback,
                 swing_n=params.swing_fractal_n,
                 volume_mult=params.mss_volume_mult,
-                mss_reversal_entry=params.mss_reversal_entry
+                mss_reversal_entry=params.mss_reversal_entry,
+                enable_short=params.enable_short
             )
             
             summary = results["summary"]
