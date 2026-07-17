@@ -80,10 +80,13 @@ US1（TAIFEX 端到端 + 消費端切換）；US3（FinMind + 交叉驗證）。
   `raw_table_name_for`；每次更新後重建連續序列 → 放寬版品質契約 → 整表覆蓋
   `fut_TXF_daily`；mock/csv/yfinance 路徑逐字不變
 - [ ] T011 [P] [US1] `tests/test_real_data_integration.py`（先寫先 FAIL）：含負價之連續
-  序列過品質契約（SC-007）；taifex 源 instrument 之監控訊息無 MOCK 前綴（離線 stub，
-  SC-006）；回測引擎直接消費連續序列跑通
-- [ ] T012 [US1] `config.yaml`：TXF source mock→taifex（**切換點**）；全套 pytest 綠 +
-  既有測試不依賴 config TXF source 之確認（plan 已查證，此任務為驗證）
+  序列過品質契約（SC-007）；taifex 源 instrument 之監控訊息無 MOCK 前綴 + **監控取數
+  走 DB 連續表＋fetch_latest（不呼叫重量 fetch()）**（離線 stub，SC-006 精修版）；
+  DB 無資料 → 警告略過不回填；回測引擎直接消費連續序列跑通
+- [ ] T012 [US1] `config.yaml`：TXF source mock→taifex（**切換點**）+
+  `monitor_signals.py` 期貨取數分流（analyze H1：taifex 源 → 讀 DB 連續表＋
+  fetch_latest 當日；mock/csv 源仍走 adapter.fetch；訊息/去重/前綴邏輯零改）；
+  全套 pytest 綠 + 既有測試不依賴 config TXF source 之確認
 
 **Checkpoint**: SC-003/006/007（離線部分）+ SC-001/008 之離線支柱。
 

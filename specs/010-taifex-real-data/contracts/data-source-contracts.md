@@ -27,6 +27,8 @@ class TaifexAdapter(DataSourceAdapter):
     def fetch(self, instrument, timeframe) -> pd.DataFrame: ...
         # 008a 契約不變：回傳連續序列（內部：fetch_raw 全區間 → rollover 三步）。
         # timeframe 僅支援 "daily"（其餘 ValueError）。
+        # ⚠ 重量呼叫（全區間網路）：僅供 ingestion/network 測試；**監控不得呼叫**
+        #（analyze H1——monitor 期貨取數改讀 DB 連續表 + fetch_latest，見下）。
     def fetch_raw(self, instrument, timeframe, start: date, end: date) -> pd.DataFrame: ...
         # 逐月 POST futDataDown（Big5 解碼、過濾一般時段與週契約、正規化欄位）；
         # 每請求間 sleep(throttle_seconds)；單請求失敗重試 max_retries 次後拋 RuntimeError。
@@ -66,6 +68,13 @@ def cross_verify(start: date, end: date, tolerance: float) -> VerifyReport: ...
   `save_to_sqlite` 整表覆蓋 `fut_TXF_daily`；raw 以（date×contract）冪等寫入
   `raw_table_name_for(inst, tf)`。
 - mock/csv/yfinance instrument 路徑**逐字不變**。
+
+## `monitor_signals.py` 期貨取數（analyze H1）
+
+- source == "taifex" 的 instrument：改為「讀 DB 連續表（`table_name_for`）＋
+  `fetch_latest` 當日列附加（若 DB 尾日 < 今日）」——每輪詢至多 1 網路請求；
+  訊息格式/去重/mock 前綴邏輯**零改動**（mock/csv 源仍走 `get_adapter().fetch()`）。
+- DB 無資料（未回填）→ 明確警告略過該標的（不觸發回填）。
 
 ## `db_security.raw_table_name_for(instrument, timeframe)`
 
