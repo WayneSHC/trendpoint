@@ -142,12 +142,12 @@ tests/test_lookahead_bias.py` 綠。
 
 ## Phase 6: Polish & Cross-Cutting
 
-- [ ] T017 [P] 007 短腿解封文件：`specs/007-mss-entry-distinction/spec.md` 之
+- [x] T017 [P] 007 短腿解封文件：`specs/007-mss-entry-distinction/spec.md` 之
   BLOCKED-003 註記移除/更新（指向 003 已實作）；`specs/003-short-side/spec.md`
   Status → Implemented（SC-007 文件面）
-- [ ] T018 [P] 更新 `CLAUDE.md` 專案地圖（003 實作狀態、期貨多空、007 短腿解封）
-- [ ] T019 [P] 執行 `quickstart.md` V1–V6 全數確認（含 `monitor_signals.py --once` 目檢）
-- [ ] T020 最終 `pytest -q` 全綠（合併關卡）；多方訊號邏輯零觸碰（V1 位元對照為證），
+- [x] T018 [P] 更新 `CLAUDE.md` 專案地圖（003 實作狀態、期貨多空、007 短腿解封）
+- [x] T019 [P] 執行 `quickstart.md` V1–V6 全數確認（含 `monitor_signals.py --once` 目檢）
+- [x] T020 最終 `pytest -q` 全綠（合併關卡）；多方訊號邏輯零觸碰（V1 位元對照為證），
   免前後回測對照義務
 
 ---
@@ -174,3 +174,18 @@ tests/test_lookahead_bias.py` 綠。
 - 訊號偵測層（detect_market_structure）與 008b 成本/sizing 元件零改動
 - 組合路徑護欄不動（期貨組合仍拒；空方僅單標的）
 - 反手、真期貨資料源不在範圍
+
+---
+
+## 完成註記（2026-07-16）
+
+20/20 任務完成。最終驗證：
+- **pytest 154 綠**（133 基線 + 21 新：原語真值表/手工情境對/鏡像變換全鏈/空方 e2e+爆倉/
+  lookahead/裁決/硬邊界/推播 dry-run）
+- **SC-003 零回歸雙保證**：現貨 5 檔 + 期貨 long-only 2 檔（TXF 46.74%/MTX 9.16%）與
+  `baseline-check.md` 逐位元一致
+- **SC-002 鏡像對稱**：數值鏡像變換全鏈（多空根位+事件一一對應）+ 手工情境對全過
+- **T019 註**：quickstart V1–V5 由測試與數字對照證明；V6 之 CLI 人工目檢以
+  `test_monitor_short.py` 隔離 dry-run 測試替代（等價證據、不依賴 yfinance 網路）
+- **007 短腿（BLOCKED-003）解封**：文件（007 baseline/quickstart/tasks + backtester/
+  portfolio 註解）全數更新；003 spec Status → Implemented

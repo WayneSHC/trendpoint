@@ -4,7 +4,7 @@
 
 **Created**: 2026-07-07
 
-**Status**: **Re-scoped & Active（2026-07-16）— 台指期期貨限定；前置 008a（資料層）+ 008b（成本/口數）已併入 main，原訂重啟條件全數滿足**
+**Status**: **Implemented（2026-07-16，`003-short-side` 分支；SC-001~008 全數達成；台指期期貨限定做空，007 短腿 BLOCKED-003 一併解封）**
 
 **Input**: 原 OpenSpec 描述對稱的多空階梯（空頭 BOS 下移階梯、看漲 MSS 反手、
 空方吊燈止損），但現行 `PositionManager` 僅處理 `direction == 1`（多頭），

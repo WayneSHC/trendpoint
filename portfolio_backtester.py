@@ -392,7 +392,8 @@ class PortfolioBacktester:
                                 disabled_filters=frozenset({'trend'}),
                                 **rev_common
                             )
-                        # 看跌反轉（mss_sig == -1）為短側做空 → BLOCKED-003（long-only 暫不支援）
+                        # 看跌反轉（mss_sig == -1）：做空僅單標的期貨路徑（spec 003）；
+                        # 組合路徑僅現貨 long-only（期貨護欄保留，008b H1 邊界）
                     
                     if is_entry:
                         signals_to_buy.append(t)

@@ -42,7 +42,7 @@ python run_backtest.py            # 校正後（mss_reversal_entry=True）
 | SC | 驗證 | 對應測試/情境 |
 |---|---|---|
 | SC-001 MSS ⊄ BOS | V2 | `test_mss_reversal.py` |
-| SC-002 前後非零 delta | V3 | 回測對照（長側）；短側 `[BLOCKED-003]` |
+| SC-002 前後非零 delta | V3 | 回測對照（長側）；短側原 `[BLOCKED-003]`——已由 spec 003（台指期做空）實作解封 |
 | SC-003 FVG 對 P&L 有作用 | V4 | 回測 FVG on/off 對照 |
 | SC-004 看前偏誤 | V1 | `test_lookahead_bias.py` |
 | SC-005 先平再開/無多空並存 | V5 | 回測 trades 斷言 |
