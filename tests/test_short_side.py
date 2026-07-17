@@ -209,3 +209,77 @@ def test_mirror_transform_full_chain_symmetry():
         assert st_time == lt_time, f"根位不對應：多 {lt_time} vs 空 {st_time}"
         assert st_act == _EVENT_MIRROR[lt_act], (
             f"事件不鏡像：{lt_act}@{lt_time} → {st_act}")
+
+
+# ---------------------------------------------------------------------------
+# SC-004（T014）：三關價互斥裁決與現貨硬邊界
+# ---------------------------------------------------------------------------
+
+def test_config_rejects_enable_short_on_equity_override():
+    """現貨 ticker override 明設 enable_short=true → 組態載入 fail-fast。"""
+    from config.config import SystemConfig
+    with pytest.raises(ValueError):
+        SystemConfig(**{
+            "data": {"tickers": ["2330.TW"], "instruments": []},
+            "strategy": {"ticker_overrides": {"2330.TW": {"enable_short": True}}},
+        })
+
+
+def test_config_allows_enable_short_on_futures_override():
+    from config.config import SystemConfig
+    cfg = SystemConfig(**{
+        "data": {"tickers": [], "instruments": [{
+            "id": "TXF", "asset_class": "futures", "source": "mock",
+            "contract": {"point_value": 200, "tick_size": 1, "exchange_fee_per_lot": 20},
+        }]},
+        "strategy": {"ticker_overrides": {"TXF": {"enable_short": True}}},
+    })
+    assert cfg.strategy.get_params_for_ticker("TXF").enable_short is True
+
+
+def test_equity_never_shorts_regardless_of_flag():
+    """引擎硬邊界：equity 路徑任何旗標組合零空單（含對下跌序列）。"""
+    df = mirror_klines(make_klines(300, freq="5min"))   # 下跌序列（空方最有機會）
+    res = BacktestEngine().run_backtest(df, enable_short=True, verbose=False)  # 預設 equity
+    trades = res["trades"]
+    if not trades.empty:
+        assert not trades["action"].isin(["SELL_SHORT", "COVER_HALF", "COVER_ALL"]).any()
+
+
+def test_three_bands_exclusive_arbitration():
+    """三關價互斥：空方進場訊號根 close < mid、多方進場訊號根 close > mid；
+    單一部位引擎下多空不可能同根雙開（動作序列合法性一併驗證）。"""
+    df = make_klines(300, freq="5min")
+    mirrored = mirror_klines(df)
+
+    long_res = _run(df, enable_short=True)          # 上升序列（多方主場）
+    short_res = _run(mirrored, enable_short=True)   # 下跌序列（空方主場）
+
+    from ladder_system import build_indicator_frame
+    for res, source_df, action, cmp in [
+        (long_res, df, "BUY", lambda c, m: c > m),
+        (short_res, mirrored, "SELL_SHORT", lambda c, m: c < m),
+    ]:
+        ind = build_indicator_frame(source_df, structure_period=10)
+        entries = res["trades"]
+        entries = entries[entries["action"] == action]
+        for _, r in entries.iterrows():
+            k = source_df.index.get_loc(r["datetime"])
+            sig = ind.iloc[k - 1]   # 訊號根
+            assert cmp(float(sig["close"]), float(sig["mid_price"])), (
+                f"{action}@{r['datetime']} 違反三關價互斥")
+
+    # 動作序列合法性：SELL_SHORT 之後只能出現 COVER_*（直到回補完畢）
+    st = short_res["trades"]
+    open_short = False
+    for _, r in st.iterrows():
+        if r["action"] == "SELL_SHORT":
+            assert not open_short
+            open_short = True
+        elif r["action"] == "COVER_ALL":
+            assert open_short
+            open_short = False
+        elif r["action"] == "COVER_HALF":
+            assert open_short
+        elif r["action"] in {"BUY", "SELL_HALF", "SELL_ALL"}:
+            assert not open_short, "持空期間出現多方動作——多空並存違規"

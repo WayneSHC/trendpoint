@@ -123,16 +123,16 @@ tests/test_lookahead_bias.py` 綠。
 
 ### Tests for User Story 3 ⚠️（先寫，先 FAIL）
 
-- [ ] T014 [P] [US3] `tests/test_short_side.py` 擴充：裁決與硬邊界——同根多空訊號 →
+- [x] T014 [P] [US3] `tests/test_short_side.py` 擴充：裁決與硬邊界——同根多空訊號 →
   三關價唯一方向（不同時進場）；現貨 ticker override enable_short=true → config 載入
   ValueError；equity 回測任何旗標組合零空單（引擎閘門）（SC-004）
-- [ ] T015 [P] [US3] `tests/test_monitor_short.py`：推播 dry-run——mock 期貨空方訊號 →
+- [x] T015 [P] [US3] `tests/test_monitor_short.py`：推播 dry-run——mock 期貨空方訊號 →
   檢測 → 訊息含方向與【MOCK 資料—dry-run】前綴 → Mock 通知端送達；去重行為不變
   （SC-008）
 
 ### Implementation for User Story 3
 
-- [ ] T016 [US3] `monitor_signals.py`：標的迭代改 `InstrumentRegistry.from_config(...)`
+- [x] T016 [US3] `monitor_signals.py`：標的迭代改 `InstrumentRegistry.from_config(...)`
   全 instrument（equity 行為不變；futures 走 `get_adapter(source).fetch` 或 `fut_*` 表）；
   instrument.source == "mock" 時訊息前綴標示；空頭訊號文案復用既有（:140-156）
 
