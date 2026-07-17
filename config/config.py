@@ -13,7 +13,7 @@ TrendPoint - 系統設定驗證規格模組 (Configuration Spec)
 import os
 import yaml
 from typing import List, Dict, Optional
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from instruments import Instrument  # spec 008a：資產類別抽象
 
@@ -137,6 +137,12 @@ class SingleStrategyParams(BaseModel):
         default=1.5,
         gt=0.0,
         description="MSS 位移（Displacement）確認的量能乘數：volume > 均量 × 此值（spec 007）"
+    )
+    enable_short: bool = Field(
+        default=False,
+        description="期貨做空開關（spec 003，期貨限定）：僅對 futures instrument 生效——"
+                    "現貨結構上不存在空方路徑（引擎閘門保證）；對現貨 ticker 的 override "
+                    "明設 True 會於組態載入時 fail-fast"
     )
 
 class StrategyConfig(BaseModel):
@@ -265,6 +271,23 @@ class SystemConfig(BaseModel):
     trading_cost: TradingCostConfig = Field(default_factory=TradingCostConfig)
     portfolio: PortfolioConfig = Field(default_factory=PortfolioConfig)
     data_quality: DataQualityConfig = Field(default_factory=DataQualityConfig)
+
+    @model_validator(mode="after")
+    def _no_short_on_equity_overrides(self) -> "SystemConfig":
+        """spec 003 SC-004 硬邊界（組態層）：對現貨 ticker 的 override 明設
+        enable_short=True → fail-fast。default.enable_short 不受限（語意=期貨可做空，
+        對現貨無效——引擎閘門另行保證現貨零空單）。"""
+        futures_ids = {
+            inst.id for inst in self.data.instruments
+            if getattr(inst.asset_class, "value", inst.asset_class) == "futures"
+        }
+        for tk, params in self.strategy.ticker_overrides.items():
+            if params.enable_short and tk not in futures_ids:
+                raise ValueError(
+                    f"ticker_overrides['{tk}'].enable_short=True 不合法：'{tk}' 非期貨 "
+                    f"instrument（現貨做空已於 spec 003 決策排除；僅期貨可做空）"
+                )
+        return self
 
 def load_config(config_path: str = None) -> SystemConfig:
     """

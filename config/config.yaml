@@ -47,6 +47,9 @@ strategy:
     mss_reversal_entry: true
     mss_ladder_k: null
     mss_volume_mult: 1.5
+    # spec 003：期貨做空（預設關；僅期貨生效——現貨結構上無空方路徑）。
+    # 對期貨標的啟用：於 ticker_overrides 對期貨 instrument id（如 TXF）設 enable_short: true
+    # enable_short: false
   ticker_overrides:
     0050.TW:
       atr_period: 10

@@ -22,13 +22,16 @@ from typing import Optional
 
 from alerts import AlertManager
 from data_ingestion import fetch_stock_data, clean_kline_dataframe
+from data_sources import get_adapter
+from instruments import AssetClass, InstrumentRegistry
 import ladder_system
 from config import load_config
 
 # 載入設定檔以確保與全域一致
 cfg = load_config()
 DB_PATH = cfg.data.database_path
-TICKERS = cfg.data.tickers
+# spec 003：迭代全部 instrument（現貨 tickers + 結構化期貨），推播能力多空齊備
+REGISTRY = InstrumentRegistry.from_config(cfg.data.tickers, cfg.data.instruments)
 
 def init_sent_alerts_db(db_path: str):
     """
@@ -102,14 +105,32 @@ def select_closed_bar_indices(bar_times: pd.DatetimeIndex,
         return -2, -3
     return -1, -2
 
-def check_new_signals(ticker: str, alert_mgr: AlertManager):
+def check_new_signals(ticker: str, alert_mgr: AlertManager, instrument=None):
     """
     獲取最新數據，計算指標並發送滿足條件的警訊。
+
+    spec 003：instrument 為 futures 時走 adapter 取數（daily 時框），訊號多空文案
+    既有齊備；source == "mock" 時訊息加【MOCK 資料—dry-run】前綴——能力完備、
+    待真源生效（真實期貨資料源接上即自動去前綴）。
     """
-    # 1. 下載最新 5 天的 5 分鐘線，以獲取最新即時資料
-    print(f"\n正在下載 {ticker} 最新即時數據進行訊號分析...")
-    df = fetch_stock_data(ticker=ticker, period="5d", interval="5m")
-    
+    is_futures = (
+        instrument is not None
+        and getattr(instrument.asset_class, "value", instrument.asset_class) == "futures"
+    )
+    mock_prefix = ""
+    if is_futures:
+        tf = "daily" if "daily" in instrument.timeframes else instrument.timeframes[0]
+        print(f"\n正在載入期貨 {ticker}（{instrument.source}/{tf}）數據進行訊號分析...")
+        df = get_adapter(instrument.source).fetch(instrument, tf)
+        bar_interval = pd.Timedelta(days=1) if tf == "daily" else pd.Timedelta(minutes=5)
+        if instrument.source == "mock":
+            mock_prefix = "【MOCK 資料—dry-run】"
+    else:
+        # 下載最新 5 天的 5 分鐘線，以獲取最新即時資料
+        print(f"\n正在下載 {ticker} 最新即時數據進行訊號分析...")
+        df = fetch_stock_data(ticker=ticker, period="5d", interval="5m")
+        bar_interval = pd.Timedelta(minutes=5)
+
     if df is None or df.empty:
         print(f"警告：未能獲取 {ticker} 數據，略過此標的。")
         return
@@ -128,7 +149,7 @@ def check_new_signals(ticker: str, alert_mgr: AlertManager):
     if len(df) < 3:
         return
 
-    bar_interval = pd.Timedelta(minutes=5)  # 對應上方 fetch 的 interval="5m"
+    # bar_interval 已依資料時框設定（現貨 5m / 期貨依 instrument 時框）
     now = pd.Timestamp.now(tz=df.index.tz)
     latest_idx, prev_idx = select_closed_bar_indices(df.index, now, bar_interval)
 
@@ -143,14 +164,14 @@ def check_new_signals(ticker: str, alert_mgr: AlertManager):
         alert_type = "BULLISH_MSS"
         if not is_alert_already_sent(ticker, latest_time, alert_type):
             msg = f"<b>【多頭反轉訊號】</b>\n標的: {ticker}\n時間: {latest_time}\n價格: {latest_bar['close']}\n說明: 偵測到最新 K 線看漲 MSS 結構破壞，大成交量突破前高，趨勢可能反轉向上！\n當前階梯參考價: {latest_bar['ladder']:.2f}"
-            if alert_mgr.send_alert(msg):
+            if alert_mgr.send_alert(mock_prefix + msg):
                 mark_alert_as_sent(ticker, latest_time, alert_type)
                 
     elif latest_bar['mss_signal'] == -1:
         alert_type = "BEARISH_MSS"
         if not is_alert_already_sent(ticker, latest_time, alert_type):
             msg = f"<b>【空頭反轉訊號】</b>\n標的: {ticker}\n時間: {latest_time}\n價格: {latest_bar['close']}\n說明: 偵測到最新 K 線看跌 MSS 結構破壞，大成交量跌破前低，趨勢可能反向做空！\n當前階梯參考價: {latest_bar['ladder']:.2f}"
-            if alert_mgr.send_alert(msg):
+            if alert_mgr.send_alert(mock_prefix + msg):
                 mark_alert_as_sent(ticker, latest_time, alert_type)
 
     # 訊號 B：BOS 趨勢延續 (1為多頭強勢突破，-1為空頭強勢突破)
@@ -158,14 +179,14 @@ def check_new_signals(ticker: str, alert_mgr: AlertManager):
         alert_type = "BULLISH_BOS"
         if not is_alert_already_sent(ticker, latest_time, alert_type):
             msg = f"<b>【多頭趨勢延續】</b>\n標的: {ticker}\n時間: {latest_time}\n價格: {latest_bar['close']}\n說明: 偵測到 BOS 結構連續突破，多頭力道持續加強！\n當前階梯參考價: {latest_bar['ladder']:.2f}"
-            if alert_mgr.send_alert(msg):
+            if alert_mgr.send_alert(mock_prefix + msg):
                 mark_alert_as_sent(ticker, latest_time, alert_type)
                 
     elif latest_bar['bos_signal'] == -1:
         alert_type = "BEARISH_BOS"
         if not is_alert_already_sent(ticker, latest_time, alert_type):
             msg = f"<b>【空頭趨勢延續】</b>\n標的: {ticker}\n時間: {latest_time}\n價格: {latest_bar['close']}\n說明: 偵測到 BOS 結構連續跌破，空頭趨勢強烈加壓！\n當前階梯參考價: {latest_bar['ladder']:.2f}"
-            if alert_mgr.send_alert(msg):
+            if alert_mgr.send_alert(mock_prefix + msg):
                 mark_alert_as_sent(ticker, latest_time, alert_type)
 
     # 訊號 C：三關價邊界突破
@@ -174,7 +195,7 @@ def check_new_signals(ticker: str, alert_mgr: AlertManager):
         alert_type = "BREAK_UPPER_BAND"
         if not is_alert_already_sent(ticker, latest_time, alert_type):
             msg = f"<b>【突破上關價】</b>\n標的: {ticker}\n時間: {latest_time}\n價格: {latest_bar['close']}\n說明: 價格收盤強勢站上昨日三關價之上關位 ({latest_bar['upper_price']:.2f})！多頭波段進入強勢區域。"
-            if alert_mgr.send_alert(msg):
+            if alert_mgr.send_alert(mock_prefix + msg):
                 mark_alert_as_sent(ticker, latest_time, alert_type)
                 
     # 最新 K 線收盤價跌破下關價
@@ -182,7 +203,7 @@ def check_new_signals(ticker: str, alert_mgr: AlertManager):
         alert_type = "BREAK_LOWER_BAND"
         if not is_alert_already_sent(ticker, latest_time, alert_type):
             msg = f"<b>【跌破下關價】</b>\n標的: {ticker}\n時間: {latest_time}\n價格: {latest_bar['close']}\n說明: 價格收盤跌破昨日三關價之下關位 ({latest_bar['lower_price']:.2f})！空頭波段進入弱勢區域。"
-            if alert_mgr.send_alert(msg):
+            if alert_mgr.send_alert(mock_prefix + msg):
                 mark_alert_as_sent(ticker, latest_time, alert_type)
 
 def main():
@@ -205,11 +226,11 @@ def main():
         alert_mgr.send_alert(test_msg)
         return
 
-    # 2. 執行單次檢測
+    # 2. 執行單次檢測（spec 003：全 instrument——現貨 + 期貨）
     if args.once:
         print("開始單次實時訊號檢測...")
-        for ticker in TICKERS:
-            check_new_signals(ticker, alert_mgr)
+        for inst in REGISTRY.all():
+            check_new_signals(inst.id, alert_mgr, instrument=inst)
         print("單次檢測執行完畢。")
         return
 
@@ -217,11 +238,11 @@ def main():
     print(f"開啟實時監控輪詢中... 檢查間隔: {args.interval} 秒。按 Ctrl+C 結束。")
     try:
         while True:
-            for ticker in TICKERS:
+            for inst in REGISTRY.all():
                 try:
-                    check_new_signals(ticker, alert_mgr)
+                    check_new_signals(inst.id, alert_mgr, instrument=inst)
                 except Exception as e:
-                    print(f"錯誤：監控標的 {ticker} 時發生未預期錯誤: {e}")
+                    print(f"錯誤：監控標的 {inst.id} 時發生未預期錯誤: {e}")
             time.sleep(args.interval)
     except KeyboardInterrupt:
         print("\n監控循環已終止。")

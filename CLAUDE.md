@@ -55,10 +55,10 @@ python monitor_signals.py --once   # 單次訊號檢測與推播
 - 通知：`monitor_signals.py` + `alerts.py`（LINE Messaging API / Telegram，無憑證時 Mock）
 - UI：`app.py`（Streamlit，禁止內嵌演算法邏輯）
 - 規格：`specs/001` 為 as-built 基準；`002`（FVG 確認）已併入 main；
-  `007`（MSS fractal 反轉進場）長側已實作並併入 main（US1–US3，SC-003 未達成如實記錄），短側待 003；
-  `008a`（台指期資料層抽象）已併入 main；`008b`（期貨成本/口數，`specs/009-taifex-cost-model`）
-  已實作於 `009-taifex-cost-model` 分支——期貨單標的可交易回測（long-only），組合路徑護欄保留；
-  `003`（短側）2026-07-12 重開為**台指期限定**、008b 合併後解除阻塞；
+  `007`（MSS fractal 反轉進場）已併入 main（SC-003 未達成如實記錄），短腿由 003 解封；
+  `008a`（資料層）+ `008b`（期貨成本/口數，`specs/009-taifex-cost-model`）已併入 main；
+  `003`（台指期做空）已實作於 `003-short-side` 分支——期貨單標的**多空**回測
+  （`enable_short` 預設關、現貨結構硬邊界、鏡像對稱測試）；組合路徑護欄保留（僅現貨）；
   `004~006` 見各 spec.md 狀態。新功能走 Spec Kit：
   `/speckit-specify` → `/speckit-plan` → `/speckit-tasks` → `/speckit-implement`
 - 理論：`three_bands_theory.md`、`docs/ladder-optimization-research.md`（階梯優化研究，

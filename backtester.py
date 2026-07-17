@@ -109,6 +109,7 @@ class BacktestEngine:
                      cost_model = None,
                      sizer = None,
                      point_value: float = 1.0,
+                     enable_short: bool = False,
                      disabled_filters: frozenset = frozenset(),
                      verbose: bool = True) -> Dict[str, Any]:
         """
@@ -135,6 +136,8 @@ class BacktestEngine:
             cost_model (CostModel, optional): 摩擦成本元件；None → 現股元件（現行語意，位元不變）
             sizer (PositionSizer, optional): 部位 sizing 元件；None → 現股整張元件
             point_value (float): 每點價值（現股 1.0；期貨 = 契約乘數，P&L = units×Δ價×此值）
+            enable_short (bool): 期貨做空開關（spec 003）；僅 asset_class="futures" 時生效
+                ——現貨結構上不存在空方路徑（任何旗標組合下 equity 零空單）
             disabled_filters (frozenset): 消融測試用，可停用 'structure'/'momentum'/'trend'/'volatility'/'global'/'regime'/'fvg'
             verbose (bool): 是否輸出進度訊息
 
@@ -178,6 +181,8 @@ class BacktestEngine:
         # 消融測試停用 regime 時，保持原語意：濾網欄位存在且恆為 True
         if 'regime_ok' not in temp_df.columns:
             temp_df['regime_ok'] = True
+        if 'regime_ok_short' not in temp_df.columns:
+            temp_df['regime_ok_short'] = True
 
         # 2. 模擬交易迴圈
         capital = self.initial_capital
@@ -242,7 +247,34 @@ class BacktestEngine:
                         ):
                             is_entry = True
                             entry_reason = "MSS 反轉進場做多"
-                    # 看跌反轉（mss_sig == -1）為短側做空 → BLOCKED-003（long-only 暫不支援）
+                    # 看跌訊號（bos/mss == -1）→ 空方進場評估（spec 003，原 BLOCKED-003 已解封）
+
+                # 空方進場（spec 003）：僅期貨且 enable_short 時可達（現貨結構硬邊界）。
+                # 三關價互斥裁決：多方 global 含 close>mid、空方 global 含 close<mid，
+                # 同根多空訊號自然只有一側能過（消融 'global' 時多方優先）。
+                short_entry = False
+                short_reason = "滿足多重確認進場做空"
+                if (not is_entry) and enable_short and is_futures and struct_row is not None:
+                    below_mid = bool(sig_row['close'] < sig_row['mid_price'])
+                    # (1) 空頭 BOS 續勢：全維度鏡像（global = 三關價之下 AND 空方市況濾網）
+                    short_global_ok = below_mid and bool(sig_row['regime_ok_short'])
+                    if bos_sig == -1:
+                        short_entry = pm.check_entry_signal(
+                            structure_sig=-1, direction=-1,
+                            disabled_filters=disabled_filters,
+                            **{**common, 'global_filter_ok': short_global_ok}
+                        )
+                    # (2) 看跌 MSS 反轉（spec 007 短腿解封）：鏡像多方反轉 profile——
+                    #     放寬順勢確認(trend)、免市況 regime、global 僅留三關價（close<mid）
+                    if (not short_entry) and mss_reversal_entry and mss_sig == -1:
+                        reversal_filters = disabled_filters | frozenset({'trend'})
+                        rev_common_s = {**common, 'global_filter_ok': below_mid}
+                        if pm.check_entry_signal(
+                            structure_sig=-1, direction=-1,
+                            disabled_filters=reversal_filters, **rev_common_s
+                        ):
+                            short_entry = True
+                            short_reason = "MSS 反轉進場做空"
 
                 if is_entry:
                     # 以次根開盤價成交 (滑價由成本元件計入成交價)
@@ -304,6 +336,53 @@ class BacktestEngine:
                             margin_fn(sizing_price) * position_shares if margin_fn else 0.0
                         )
                     trade_logs.append(entry_log)
+
+                elif short_entry:
+                    # 空方進場（spec 003）：賣出開倉於次根開盤，滑價不利向下；
+                    # 僅期貨可達（成本/口數 = 008b 元件，天然對稱、無借券概念）
+                    raw_price = row['open']
+                    execution_price = cost_model.slip(raw_price, "sell")
+                    sizing_price = float(sig_row['close'])   # FR-007：sizing 用訊號根收盤
+                    position_shares = sizer.size(capital, sizing_price)
+
+                    if position_shares <= 0.0:
+                        current_equity = capital
+                        equity_curve.append({
+                            "datetime": current_time,
+                            "capital": capital,
+                            "position_value": 0.0,
+                            "equity": current_equity
+                        })
+                        continue
+
+                    entry_costs = cost_model.entry_costs(execution_price, position_shares)
+                    capital -= entry_costs.total   # 期貨：僅扣摩擦成本、不付名目
+
+                    pm.is_active = True
+                    pm.entry_price = execution_price
+                    pm.position_size = 1.0
+                    pm.stop_loss = execution_price + 2.0 * sig_row['atr']  # 空方止損在上方
+                    pm.stage = 1
+                    pm.direction = -1
+                    entry_bar_idx = i
+
+                    short_log = {
+                        "datetime": current_time,
+                        "action": "SELL_SHORT",
+                        "shares": position_shares,
+                        "price": execution_price,
+                        "commission": entry_costs.commission,
+                        "tax": entry_costs.tax,
+                        "cash": capital,
+                        "event": short_reason,
+                        "point_value": point_value,
+                        "sizing_price": sizing_price,
+                    }
+                    margin_fn = getattr(sizer, "margin_per_lot", None)
+                    short_log["margin_used"] = (
+                        margin_fn(sizing_price) * position_shares if margin_fn else 0.0
+                    )
+                    trade_logs.append(short_log)
             
             # 若目前有持倉，動態更新與管理部位
             elif pm.is_active and position_shares > 0.0:
@@ -315,18 +394,20 @@ class BacktestEngine:
                 # 計算當下部位價值
                 position_value = position_shares * row['close']
 
-                # 執行部位管理
+                # 執行部位管理（spec 003：空方持倉需空方吊燈——同為判定根前一根之值）
                 event = pm.manage_position(
                     current_close=sig_row['close'],
                     current_atr=sig_row['atr'],
                     chandelier_long=prev_ch_long,
                     bar_count=bar_count,
-                    time_limit=time_limit
+                    time_limit=time_limit,
+                    chandelier_short=struct_row['chandelier_short']
                 )
                 
-                # 處理減半平倉 (階段 1 止盈)
+                # 處理減半平倉 (階段 1 止盈)；空方 = 部分回補（spec 003）
                 if event is ExitEvent.STAGE1_HALF:
-                    execution_price = cost_model.slip(row['open'], "sell")
+                    is_short_pos = (pm.direction == -1)
+                    execution_price = cost_model.slip(row['open'], "buy" if is_short_pos else "sell")
                     # 賣出單位受最小單位約束（現股整張 / 期貨整數口，FR-012）；
                     # 若僅持有一張（口）無法分割，則跳過實際賣出，但 PositionManager
                     # 已將止損移至保本位——經濟意義等同「部位太小不拆分、轉零風險持倉」。
@@ -340,8 +421,11 @@ class BacktestEngine:
                         tax = exit_costs.tax
 
                         if is_futures:
-                            # 期貨：入帳 = 已實現點數損益 × 乘數 − 摩擦成本
-                            realized = shares_to_sell * (execution_price - pm.entry_price) * point_value
+                            # 期貨：入帳 = 已實現點數損益 × 乘數 − 摩擦成本（方向因子）
+                            if is_short_pos:
+                                realized = shares_to_sell * (pm.entry_price - execution_price) * point_value
+                            else:
+                                realized = shares_to_sell * (execution_price - pm.entry_price) * point_value
                             capital += realized - exit_costs.total
                         else:
                             capital += revenue - (commission + tax)
@@ -349,7 +433,7 @@ class BacktestEngine:
 
                         half_log = {
                             "datetime": current_time,
-                            "action": "SELL_HALF",
+                            "action": "COVER_HALF" if is_short_pos else "SELL_HALF",
                             "shares": shares_to_sell,
                             "price": execution_price,
                             "commission": commission,
@@ -361,9 +445,10 @@ class BacktestEngine:
                             half_log["point_value"] = point_value
                         trade_logs.append(half_log)
                 
-                # 處理全數平倉 (止損、時間止盈或剩餘部位吊燈止損)
+                # 處理全數平倉 (止損、時間止盈或剩餘部位吊燈止損)；空方 = 全回補
                 elif event in FULL_EXIT_EVENTS:
-                    execution_price = cost_model.slip(row['open'], "sell")
+                    is_short_pos = (pm.direction == -1)
+                    execution_price = cost_model.slip(row['open'], "buy" if is_short_pos else "sell")
                     shares_sold = position_shares
                     revenue = shares_sold * execution_price
 
@@ -372,7 +457,10 @@ class BacktestEngine:
                     tax = exit_costs.tax
 
                     if is_futures:
-                        realized = shares_sold * (execution_price - pm.entry_price) * point_value
+                        if is_short_pos:
+                            realized = shares_sold * (pm.entry_price - execution_price) * point_value
+                        else:
+                            realized = shares_sold * (execution_price - pm.entry_price) * point_value
                         capital += realized - exit_costs.total
                     else:
                         capital += revenue - (commission + tax)
@@ -380,7 +468,7 @@ class BacktestEngine:
 
                     full_log = {
                         "datetime": current_time,
-                        "action": "SELL_ALL",
+                        "action": "COVER_ALL" if is_short_pos else "SELL_ALL",
                         "shares": shares_sold,
                         "price": execution_price,
                         "commission": commission,
@@ -395,7 +483,11 @@ class BacktestEngine:
             # 更新淨值曲線（期貨：權益 = 現金 + 未實現點數損益×乘數；現貨：現金 + 市值）
             if is_futures:
                 if position_shares > 0.0:
-                    unrealized = position_shares * (row['close'] - pm.entry_price) * point_value
+                    if pm.direction == -1:
+                        # 空方未實現：價格下跌獲利（spec 003 方向因子）
+                        unrealized = position_shares * (pm.entry_price - row['close']) * point_value
+                    else:
+                        unrealized = position_shares * (row['close'] - pm.entry_price) * point_value
                     current_equity = capital + unrealized
                     position_value_now = position_shares * row['close'] * point_value  # 名目（曝險）
                 else:
@@ -403,15 +495,21 @@ class BacktestEngine:
                     position_value_now = 0.0
 
                 # spec 008b FR-011 爆倉防護：權益 ≤ 0 當根以當根收盤強制結清並終止
+                # （spec 003：空方爆倉由上漲觸發，強制回補 COVER_ALL，機制不變）
                 if current_equity <= 0.0:
                     if position_shares > 0.0:
                         forced_price = row['close']
                         forced_costs = cost_model.exit_costs(forced_price, position_shares)
-                        realized = position_shares * (forced_price - pm.entry_price) * point_value
+                        if pm.direction == -1:
+                            realized = position_shares * (pm.entry_price - forced_price) * point_value
+                            forced_action = "COVER_ALL"
+                        else:
+                            realized = position_shares * (forced_price - pm.entry_price) * point_value
+                            forced_action = "SELL_ALL"
                         capital += realized - forced_costs.total
                         forced_log = {
                             "datetime": current_time,
-                            "action": "SELL_ALL",
+                            "action": forced_action,
                             "shares": position_shares,
                             "price": forced_price,
                             "commission": forced_costs.commission,
@@ -523,7 +621,36 @@ class BacktestEngine:
 
                     profit = total_revenue - initial_cost - total_friction
                     paired_trades.append((profit, profit / initial_cost))
-            
+
+            # spec 003：空方配對（SELL_SHORT → COVER_ALL，含中途 COVER_HALF）。
+            # 多方配對段（上方）逐字不動；空方 profit = 進場名目 − 回補名目 − 摩擦。
+            short_entry_trades = df_trades[df_trades['action'] == 'SELL_SHORT']
+            cover_all_trades = df_trades[df_trades['action'] == 'COVER_ALL']
+            for idx, s_row in short_entry_trades.iterrows():
+                s_time = s_row['datetime']
+                later_covers = cover_all_trades[cover_all_trades['datetime'] > s_time]
+                if not later_covers.empty:
+                    c_row = later_covers.iloc[0]
+                    c_time = c_row['datetime']
+                    half_covers = df_trades[(df_trades['action'] == 'COVER_HALF') &
+                                            (df_trades['datetime'] > s_time) &
+                                            (df_trades['datetime'] < c_time)]
+
+                    pv_s = s_row.get('point_value', 1.0)
+                    entry_value = s_row['shares'] * s_row['price'] * pv_s
+                    denom = entry_value + s_row['commission']
+
+                    exit_value = c_row['shares'] * c_row['price'] * c_row.get('point_value', 1.0)
+                    total_friction = (c_row['commission'] + c_row['tax']
+                                      + s_row['commission'] + s_row['tax'])
+                    if not half_covers.empty:
+                        for _, h_row in half_covers.iterrows():
+                            exit_value += h_row['shares'] * h_row['price'] * h_row.get('point_value', 1.0)
+                            total_friction += h_row['commission'] + h_row['tax']
+
+                    profit = entry_value - exit_value - total_friction
+                    paired_trades.append((profit, profit / denom))
+
             total_trades = len(paired_trades)
             if total_trades > 0:
                 trade_returns = [r for _, r in paired_trades]

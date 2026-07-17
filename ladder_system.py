@@ -441,13 +441,16 @@ def calculate_efficiency_ratio(series: pd.Series, period: int = 10) -> pd.Series
 def calculate_regime_filter(df: pd.DataFrame,
                             use_adx: bool = True, adx_period: int = 14, adx_threshold: float = 20.0,
                             use_ma: bool = True, ma_period: int = 200,
-                            use_er: bool = False, er_period: int = 10, er_threshold: float = 0.3) -> pd.Series:
+                            use_er: bool = False, er_period: int = 10, er_threshold: float = 0.3,
+                            direction: int = 1) -> pd.Series:
     """
-    綜合市況濾網 (Regime Filter)：回傳布林序列，True 代表允許做多進場。
-    - ADX 濾網：趨勢強度不足（盤整）時禁止進場。
-    - 長均線濾網：價格低於長期均線（如 200MA）時禁止做多——最便宜的災難保險。
-    - ER 濾網：路徑噪音過高時禁止進場。
+    綜合市況濾網 (Regime Filter)：回傳布林序列，True 代表允許順方向進場。
+    - ADX 濾網：趨勢強度不足（盤整）時禁止進場（無方向，兩側共用）。
+    - 長均線濾網：direction=1 時價格低於長均線禁止做多；direction=-1 時
+      價格高於長均線禁止做空（spec 003 鏡像）——最便宜的災難保險。
+    - ER 濾網：路徑噪音過高時禁止進場（無方向，兩側共用）。
     所有指標均移位一根 K 線，確保僅使用已收盤的歷史數據（防看前偏誤）。
+    direction=1 之輸出與 003 前逐字相同。
     """
     ok = pd.Series(True, index=df.index)
 
@@ -458,7 +461,10 @@ def calculate_regime_filter(df: pd.DataFrame,
     if use_ma:
         # min_periods 防止前段資料全為 NaN 而封死整段回測（資料不足時以現有均值替代）
         long_ma = df['close'].rolling(window=ma_period, min_periods=1).mean().shift(1)
-        ok &= (df['close'] > long_ma)
+        if direction == 1:
+            ok &= (df['close'] > long_ma)
+        else:
+            ok &= (df['close'] < long_ma)
 
     if use_er:
         er = calculate_efficiency_ratio(df['close'], period=er_period).shift(1)
@@ -514,6 +520,10 @@ def build_indicator_frame(df: pd.DataFrame,
     # 市況濾網 (Regime Filter)：ADX 趨勢強度 + 長均線方向 + ER 噪音
     if include_regime:
         out['regime_ok'] = calculate_regime_filter(out, **(regime_kwargs or {}))
+        # spec 003：空方市況濾網（ADX/ER 共用、長均線分量鏡像：價<長均線）
+        out['regime_ok_short'] = calculate_regime_filter(
+            out, **{**(regime_kwargs or {}), 'direction': -1}
+        )
 
     # 結構與階梯計算
     mss, bos = detect_market_structure(out, period=structure_period,
@@ -595,26 +605,41 @@ class PositionManager:
                            structure_sig: int,
                            global_filter_ok: bool,
                            is_daily: bool = False,
-                           disabled_filters: frozenset = frozenset()) -> bool:
+                           disabled_filters: frozenset = frozenset(),
+                           direction: int = 1) -> bool:
         """
         多重確認進場邏輯 (4 維度確認)
 
         disabled_filters 可包含 'structure' / 'momentum' / 'trend' / 'volatility' / 'global'，
         被列入的維度將直接視為通過。此參數供消融測試 (Ablation Test) 逐一評估
         每道濾網對期望值的真實貢獻，避免堆疊「看起來嚴謹」但只會扼殺交易次數的濾網。
+
+        direction（spec 003）：1 = 多方（預設，行為與 003 前逐字相同）；
+        -1 = 空方鏡像——結構端看跌(-1)、動能端收陰線、趨勢端價低於當日開盤（與 VWAP）。
+        波動端（振幅）與全域濾網無方向、兩側同式。
         """
-        # 1. 結構端: MSS 或 BOS 方向確認 (1 代表看漲，-1 代表看跌，0 代表無訊號)
-        structure_ok = (structure_sig == 1) or ('structure' in disabled_filters)
+        if direction == 1:
+            # 1. 結構端: MSS 或 BOS 方向確認 (1 代表看漲，-1 代表看跌，0 代表無訊號)
+            structure_ok = (structure_sig == 1) or ('structure' in disabled_filters)
 
-        # 2. 動能端: 收紅 K (陽線)
-        momentum_ok = (close > open_val) or ('momentum' in disabled_filters)
+            # 2. 動能端: 收紅 K (陽線)
+            momentum_ok = (close > open_val) or ('momentum' in disabled_filters)
 
-        # 3. 趨勢端: 價格同時處於當日開盤價與 VWAP 之上 (若為日線則 vwap 等於 close，此時僅看高於 daily_open)
-        if is_daily:
-            trend_ok = (close > daily_open)
+            # 3. 趨勢端: 價格同時處於當日開盤價與 VWAP 之上 (若為日線則 vwap 等於 close，此時僅看高於 daily_open)
+            if is_daily:
+                trend_ok = (close > daily_open)
+            else:
+                trend_ok = (close > daily_open) and (close > vwap)
+            trend_ok = trend_ok or ('trend' in disabled_filters)
         else:
-            trend_ok = (close > daily_open) and (close > vwap)
-        trend_ok = trend_ok or ('trend' in disabled_filters)
+            # 空方鏡像（spec 003 FR-001）
+            structure_ok = (structure_sig == -1) or ('structure' in disabled_filters)
+            momentum_ok = (close < open_val) or ('momentum' in disabled_filters)
+            if is_daily:
+                trend_ok = (close < daily_open)
+            else:
+                trend_ok = (close < daily_open) and (close < vwap)
+            trend_ok = trend_ok or ('trend' in disabled_filters)
 
         # 4. 波動端: 振幅位移大於 1.2 倍 ATR。
         # ATR 未成熟（NaN 或 <=0，見 calculate_atr 暖機期）一律不進場——
@@ -633,7 +658,8 @@ class PositionManager:
                         current_atr: float,
                         chandelier_long: float,
                         bar_count: int,
-                        time_limit: int = 10) -> ExitEvent:
+                        time_limit: int = 10,
+                        chandelier_short: float = None) -> ExitEvent:
         """
         部位動態跟蹤管理，回傳 ExitEvent（呼叫端以 enum 身分比對）。
 
@@ -642,9 +668,54 @@ class PositionManager:
           不觸發，屬樂觀假設；實際成交價由回測引擎決定（次根開盤±滑價）。
         - 本方法不回報損益數字：舊版回傳的 pnl_ratio 以止損價計算、
           與引擎實際成交價不一致，且從未被任何引擎使用，已移除。
+
+        空方（spec 003）：direction == -1 時走鏡像分支——止損於價格上穿、
+        階段 1 目標 = entry − 1.5×ATR、階段 2 吊燈用 chandelier_short
+        （Rolling Min + m×ATR，只降不升）。既有多方呼叫不傳 chandelier_short，
+        行為逐字不變。
         """
         if not self.is_active:
             return ExitEvent.NOT_ACTIVE
+
+        # 空頭部位管理邏輯（spec 003 FR-002：多方分支之完整鏡像）
+        if self.direction == -1:
+            # 止損：價格上穿（收盤 ≥ 止損位）
+            if current_close >= self.stop_loss:
+                self.is_active = False
+                self.stage = 0
+                return ExitEvent.STOP_LOSS
+
+            # 時間止盈：僅約束階段 1（語意同多方）
+            if bar_count >= time_limit and self.stage == 1:
+                self.is_active = False
+                self.stage = 0
+                return ExitEvent.TIME_LIMIT
+
+            # 階段 1：獲利達 1.5×ATR（價格下跌）→ 回補 50% 並移止損至保本位
+            if self.stage == 1:
+                target_p1 = self.entry_price - 1.5 * current_atr
+                if current_close <= target_p1:
+                    self.stage = 2
+                    self.stop_loss = self.entry_price
+                    self.position_size *= 0.5
+                    return ExitEvent.STAGE1_HALF
+
+            # 階段 2：剩餘部位以空方吊燈（Rolling Min + m×ATR）移動跟蹤，只降不升
+            elif self.stage == 2:
+                if chandelier_short is None:
+                    raise ValueError(
+                        "空方階段 2 需要 chandelier_short（Rolling Min + m×ATR）——"
+                        "呼叫端漏傳（spec 003 契約 fail-fast）"
+                    )
+                if chandelier_short < self.stop_loss:
+                    self.stop_loss = chandelier_short
+
+                if current_close > self.stop_loss:
+                    self.is_active = False
+                    self.stage = 0
+                    return ExitEvent.CHANDELIER
+
+            return ExitEvent.HOLDING
 
         # 買入多頭部位管理邏輯
         if self.direction == 1:
