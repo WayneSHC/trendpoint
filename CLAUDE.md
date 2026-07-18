@@ -49,16 +49,21 @@ python monitor_signals.py --once   # 單次訊號檢測與推播
   期貨每口定額+保證金槓桿）、`portfolio_backtester.py`（**期貨護欄保留**，僅現貨）、
   `walk_forward.py`、`optimizer.py`、`monte_carlo.py`、`run_*.py` 為各入口
 - 資料：`instruments.py`（Instrument 資產類別抽象 + registry，spec 008a）→
-  `data_sources/`（可插拔來源 adapter：yfinance/csv/mock，rollover 由 adapter 自理）→
+  `data_sources/`（可插拔來源 adapter：yfinance/csv/mock + **taifex 真源/finmind 驗證源**
+  （spec 010）；`rollover.py` 連續月引擎——量最大月轉倉 + back-adjust）→
   `data_ingestion.py` → SQLite `trendpoint.db`（gitignored）；表名一律經
-  `db_security.table_name_for`（equity→`stock_*`、futures→`fut_*`）；`data/*.csv` 為快取
+  `db_security.table_name_for`（equity→`stock_*`、futures→`fut_*`、raw 層→`fut_*_raw_*`）；
+  `verify_futures_data.py` 雙源交叉驗證（哨兵，需 FINMIND_TOKEN 環境變數）；
+  TXF 監控取數＝讀庫＋當日端點（**禁**輪詢中呼叫重量 fetch()）；`data/*.csv` 為快取
 - 通知：`monitor_signals.py` + `alerts.py`（LINE Messaging API / Telegram，無憑證時 Mock）
 - UI：`app.py`（Streamlit，禁止內嵌演算法邏輯）
 - 規格：`specs/001` 為 as-built 基準；`002`（FVG 確認）已併入 main；
   `007`（MSS fractal 反轉進場）已併入 main（SC-003 未達成如實記錄），短腿由 003 解封；
   `008a`（資料層）+ `008b`（期貨成本/口數，`specs/009-taifex-cost-model`）已併入 main；
-  `003`（台指期做空）已實作於 `003-short-side` 分支——期貨單標的**多空**回測
+  `003`（台指期做空）已併入 main——期貨單標的**多空**回測
   （`enable_short` 預設關、現貨結構硬邊界、鏡像對稱測試）；組合路徑護欄保留（僅現貨）；
+  `010`（真實台指期資料源，`specs/010-taifex-real-data`）已實作於分支——TXF 接
+  TAIFEX 官方（1998 起全歷史回填/每日增量）、FinMind 交叉驗證、MTX 暫留 mock；
   `004~006` 見各 spec.md 狀態。新功能走 Spec Kit：
   `/speckit-specify` → `/speckit-plan` → `/speckit-tasks` → `/speckit-implement`
 - 理論：`three_bands_theory.md`、`docs/ladder-optimization-research.md`（階梯優化研究，
