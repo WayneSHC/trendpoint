@@ -395,7 +395,8 @@ def test_mss_future_bars_do_not_leak_into_signal():
 # ---------------------------------------------------------------------------
 
 def _futures_run(df, initial_capital=10_000_000.0):
-    from acceptance_fixtures import make_klines  # noqa: F401（fixture 來源見 e2e）
+    from acceptance_fixtures import make_klines, with_unadj  # noqa: F401（fixture 來源見 e2e）
+    df = with_unadj(df)          # spec 011：期貨路徑需未調整參考價欄位
     from config.config import FuturesCostConfig
     from instruments import ContractSpec
     from trading_costs import FuturesCostModel, FuturesSizer
@@ -455,6 +456,8 @@ def test_short_entry_sizing_and_execution_no_lookahead():
     cfg = FuturesCostConfig()
 
     def run_short(d):
+        from acceptance_fixtures import with_unadj
+        d = with_unadj(d)        # spec 011：期貨路徑需未調整參考價欄位
         return BacktestEngine(initial_capital=10_000_000.0).run_backtest(
             d, asset_class="futures",
             cost_model=FuturesCostModel(txc, cfg),

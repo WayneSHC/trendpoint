@@ -67,10 +67,14 @@ def with_unadj(df: pd.DataFrame) -> pd.DataFrame:
 
     刻意不併入 make_klines：新寫的期貨測試若忘了帶欄位，應該撞上硬失敗並讀到
     錯誤訊息（從而知道有兩組價格基準），而不是默默通過。
+
+    **只補缺欄、不覆寫既有值**：這讓它能安全掛在各測試檔的執行 funnel 上，
+    而不會破壞刻意構造「調整後 ≠ 未調整」情境的測試。
     """
     out = df.copy()
     for col in ("open", "high", "low", "close"):
-        out[f"unadj_{col}"] = out[col]
+        if f"unadj_{col}" not in out.columns:
+            out[f"unadj_{col}"] = out[col]
     return out
 
 

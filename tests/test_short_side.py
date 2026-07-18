@@ -159,19 +159,28 @@ def test_short_time_limit_stage1_only():
 def mirror_klines(df: pd.DataFrame) -> pd.DataFrame:
     """價格繞常數 C 翻轉：p' = 2C − p；high↔low 對調；量能不變（data-model 映射）。"""
     C = (float(df['high'].max()) + float(df['low'].min())) / 2.0
-    return pd.DataFrame({
+    out = pd.DataFrame({
         'open': 2 * C - df['open'],
         'high': 2 * C - df['low'],
         'low': 2 * C - df['high'],
         'close': 2 * C - df['close'],
         'volume': df['volume'],
     }, index=df.index)
+    # spec 011：未調整參考價一併鏡像（若來源有帶），維持兩組價格的對應關係
+    if 'unadj_close' in df.columns:
+        out['unadj_open'] = 2 * C - df['unadj_open']
+        out['unadj_high'] = 2 * C - df['unadj_low']
+        out['unadj_low'] = 2 * C - df['unadj_high']
+        out['unadj_close'] = 2 * C - df['unadj_close']
+    return out
 
 
 _EVENT_MIRROR = {"BUY": "SELL_SHORT", "SELL_HALF": "COVER_HALF", "SELL_ALL": "COVER_ALL"}
 
 
 def _run(df, enable_short):
+    from acceptance_fixtures import with_unadj
+    df = with_unadj(df)          # spec 011：期貨路徑需未調整參考價欄位
     eng = BacktestEngine(initial_capital=10_000_000.0)
     return eng.run_backtest(
         df, asset_class="futures",
