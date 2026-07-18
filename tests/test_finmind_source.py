@@ -43,3 +43,30 @@ def test_missing_token_failfast(monkeypatch):
     ad = FinMindAdapter()
     with pytest.raises(MissingTokenError):
         ad.fetch_raw(TXF, "daily", date(2023, 7, 1), date(2023, 7, 31))
+
+
+def test_token_not_in_url_and_scrubbed_from_errors(monkeypatch):
+    """安全鐵律：token 不得出現在 URL 查詢參數（會進 HTTP 錯誤訊息與日誌）——
+    走 Authorization header；HTTP 錯誤訊息中的 token 一律洗除。"""
+    import requests as _requests
+
+    monkeypatch.setenv("FINMIND_TOKEN", "sekret-token-123")
+    captured = {}
+
+    class _Resp:
+        def raise_for_status(self):
+            raise _requests.exceptions.HTTPError(
+                "400 Client Error: Bad Request for url: "
+                "https://api.finmindtrade.com/api/v4/data?token=sekret-token-123")
+
+    class _Sess:
+        def get(self, url, **kw):
+            captured.update(kw)
+            return _Resp()
+
+    ad = FinMindAdapter(session=_Sess())
+    with pytest.raises(RuntimeError) as ei:
+        ad.fetch_raw(TXF, "daily", date(2023, 7, 1), date(2023, 7, 31))
+    assert "sekret-token-123" not in str(ei.value)          # 錯誤訊息無 token
+    assert "token" not in captured.get("params", {})        # URL 無 token
+    assert captured["headers"]["Authorization"] == "Bearer sekret-token-123"

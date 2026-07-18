@@ -92,14 +92,19 @@ class FinMindAdapter(DataSourceAdapter):
         if timeframe != "daily":
             raise ValueError(f"FinMind adapter 僅支援 daily（收到 {timeframe!r}）")
         token = self._token()
+        # 安全：token 走 Authorization header——放 URL 查詢參數會隨 HTTPError
+        # 訊息（含完整 URL）洩入日誌；錯誤訊息再洗一層以防萬一。
         resp = self._session.get(_URL, params={
             "dataset": "TaiwanFuturesDaily",
             "data_id": self._commodity(instrument),
             "start_date": start.isoformat(),
             "end_date": end.isoformat(),
-            "token": token,
-        }, timeout=30)
-        resp.raise_for_status()
+        }, headers={"Authorization": f"Bearer {token}"}, timeout=30)
+        try:
+            resp.raise_for_status()
+        except requests.exceptions.HTTPError as e:
+            raise RuntimeError(
+                f"FinMind HTTP 錯誤：{str(e).replace(token, '***')}") from None
         payload = resp.json()
         if payload.get("status") not in (200, None) and payload.get("msg") != "success":
             raise RuntimeError(f"FinMind 回應異常：{payload.get('msg')}")
