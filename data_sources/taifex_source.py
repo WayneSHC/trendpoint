@@ -21,6 +21,7 @@ import csv
 import io
 import time
 from datetime import date, timedelta
+from typing import NamedTuple
 
 import pandas as pd
 import requests
@@ -40,20 +41,58 @@ _UA = {"User-Agent": "Mozilla/5.0 (TrendPoint research; contact: local)"}
 # instrument id → TAIFEX commodity_id（查詢代碼）
 _COMMODITY_MAP = {"TXF": "TX"}
 
-# Big5 CSV 欄位 → raw schema（缺一即 fail-fast）
-_COL_MAP = {
-    "交易日期": "date",
-    "到期月份(週別)": "contract",
-    "開盤價": "open",
-    "最高價": "high",
-    "最低價": "low",
-    "收盤價": "close",
-    "成交量": "volume",
-    "結算價": "settlement",
-    "未沖銷契約數": "open_interest",
-}
-_SESSION_COL = "交易時段"
-_CONTRACT_ID_COL = "契約"
+# 表頭語言隨端點而異（實測 2026-07-18）：CSV 下載端點回中文（MS950），
+# OpenAPI 當日端點回**英文鍵**——但兩者的「交易時段」值皆為中文（一般/盤後），
+# 故時段判斷不隨表頭語言改變。缺欄檢查：兩套映射皆不匹配才 fail-fast。
+class _HeaderSchema(NamedTuple):
+    lang: str
+    col_map: dict[str, str]      # 來源欄位 → raw schema
+    date: str                    # 交易日期欄
+    contract_id: str             # 契約代號欄（值如 "TX"）
+    contract_month: str          # 到期月份欄
+    session: str                 # 交易時段欄（2017-05 前的檔案可能沒有 → 視為一般）
+
+
+_SCHEMA_ZH = _HeaderSchema(
+    lang="中文",
+    col_map={
+        "交易日期": "date",
+        "到期月份(週別)": "contract",
+        "開盤價": "open",
+        "最高價": "high",
+        "最低價": "low",
+        "收盤價": "close",
+        "成交量": "volume",
+        "結算價": "settlement",
+        "未沖銷契約數": "open_interest",
+    },
+    date="交易日期",
+    contract_id="契約",
+    contract_month="到期月份(週別)",
+    session="交易時段",
+)
+_SCHEMA_EN = _HeaderSchema(
+    lang="英文",
+    col_map={
+        "Date": "date",
+        "ContractMonth(Week)": "contract",
+        "Open": "open",
+        "High": "high",
+        "Low": "low",
+        "Last": "close",              # ⚠ 收盤價英文是 Last，不是 Close
+        "Volume": "volume",
+        "SettlementPrice": "settlement",
+        "OpenInterest": "open_interest",
+    },
+    date="Date",
+    contract_id="Contract",
+    contract_month="ContractMonth(Week)",
+    session="TradingSession",
+)
+_SCHEMAS = (_SCHEMA_ZH, _SCHEMA_EN)
+
+# 缺值標記（無成交列）：中文 CSV 用 "-"，OpenAPI 另有 "NULL"
+_MISSING_MARKERS = {"", "-", "NULL"}
 
 
 class TaifexAdapter(DataSourceAdapter):
@@ -72,43 +111,61 @@ class TaifexAdapter(DataSourceAdapter):
 
     # ------------------------------------------------------------------ 解析
 
-    def _parse_csv(self, content: bytes, *, commodity: str) -> pd.DataFrame:
-        """Big5 CSV → raw DataFrame（過濾一般時段、僅月契約、數值化）。"""
-        text = content.decode("big5", errors="replace")
+    @staticmethod
+    def _select_schema(header: list[str]) -> _HeaderSchema:
+        """依表頭挑映射（中/英），兩套皆不匹配才 fail-fast 並交代各缺什麼。"""
+        shortfalls = []
+        for schema in _SCHEMAS:
+            missing = (set(schema.col_map) | {schema.contract_id}) - set(header)
+            if not missing:
+                return schema
+            shortfalls.append(f"{schema.lang}表頭缺少 {sorted(missing)}")
+        raise ValueError(
+            f"TAIFEX CSV 格式異常：{'；'.join(shortfalls)}；實際欄位 {header}"
+        )
+
+    def _parse_csv(self, content: bytes | str, *, commodity: str) -> pd.DataFrame:
+        """TAIFEX CSV → raw DataFrame（過濾一般時段、僅月契約、數值化）。
+
+        `content` 為 bytes 時以 MS950 解碼（CSV 端點宣告之編碼，big5 超集）；
+        OpenAPI 為 UTF-8 JSON，故由呼叫端直接傳入 str，不經 big5 轉碼。
+        """
+        text = content if isinstance(content, str) else content.decode("ms950", errors="replace")
         reader = csv.DictReader(io.StringIO(text))
-        header = reader.fieldnames or []
-        header = [h.strip() for h in header]
-        missing = (set(_COL_MAP) | {_CONTRACT_ID_COL}) - set(header)
-        if missing:
-            raise ValueError(
-                f"TAIFEX CSV 格式異常：缺少欄位 {sorted(missing)}；實際欄位 {header}"
-            )
+        header = [h.strip() for h in (reader.fieldnames or [])]
+        schema = self._select_schema(header)
 
         rows = []
+        commodity_rows = 0            # 配到該商品的列數（用於時段防呆）
+        session_rejected: list[str] = []
         for rec in reader:
             # 尾隨逗號使 DictReader 產生 None 鍵（值為 list）——一律略過
             rec = {k.strip(): (v or "").strip()
                    for k, v in rec.items()
                    if k is not None and not isinstance(v, list)}
-            if rec.get(_CONTRACT_ID_COL) != commodity:
+            if rec.get(schema.contract_id) != commodity:
                 continue
-            session_val = rec.get(_SESSION_COL, "")
+            commodity_rows += 1
+            # 時段值兩種表頭皆為中文（實測）；缺欄位者為 2017-05 前檔案，視為一般
+            session_val = rec.get(schema.session, "")
             if session_val not in ("", "一般"):        # 盤後列排除（2017-05 起）
+                session_rejected.append(session_val)
                 continue
-            contract = rec.get("到期月份(週別)", "")
+            contract = rec.get(schema.contract_month, "")
             if not (len(contract) == 6 and contract.isdigit()):   # 週契約排除
                 continue
             try:
                 row = {
-                    "date": pd.Timestamp(rec["交易日期"].replace("/", "-")),
+                    # 日期格式隨端點而異：CSV "2023/07/03"、OpenAPI "20260717"
+                    "date": pd.Timestamp(rec[schema.date].replace("/", "-")),
                     "contract": contract,
                 }
                 numeric_ok = True
-                for src, dst in _COL_MAP.items():
+                for src, dst in schema.col_map.items():
                     if dst in ("date", "contract"):
                         continue
                     val = rec[src].replace(",", "")
-                    if val in ("", "-"):
+                    if val in _MISSING_MARKERS:
                         numeric_ok = False          # 無成交列（開高低收缺值）→ 略過
                         break
                     row[dst] = float(val)
@@ -118,9 +175,19 @@ class TaifexAdapter(DataSourceAdapter):
                 raise ValueError(f"TAIFEX CSV 列解析失敗：{rec}") from e
             rows.append(row)
 
+        # 防呆：有候選列卻被時段檢查濾光 → TAIFEX 疑似改了時段標示（如比照表頭英譯）。
+        # 靜默回空會讓 monitor_signals 的 `not latest_raw.empty` 無聲跳過、繼續用舊資料
+        # 判訊號，比大聲壞掉更難察覺，故 fail-fast。休市/無此商品為 0 候選，不觸發。
+        if commodity_rows and len(session_rejected) == commodity_rows:
+            raise ValueError(
+                f"TAIFEX {commodity} 全部 {commodity_rows} 列均被交易時段檢查濾除"
+                f"（欄位 {schema.session!r} 實際值：{sorted(set(session_rejected))}；"
+                f"僅接受 '' 或 '一般'）——疑似 TAIFEX 變更時段標示，請更新過濾條件"
+            )
+
         if not rows:
             return pd.DataFrame(columns=["date", "contract", *(
-                c for c in _COL_MAP.values() if c not in ("date", "contract"))])
+                c for c in schema.col_map.values() if c not in ("date", "contract"))])
         df = pd.DataFrame(rows)
         df = df.drop_duplicates(subset=["date", "contract"], keep="last")
         return df.sort_values(["date", "contract"]).reset_index(drop=True)
@@ -179,7 +246,7 @@ class TaifexAdapter(DataSourceAdapter):
                    .sort_values(["date", "contract"]).reset_index(drop=True))
 
     def fetch_latest(self, instrument) -> pd.DataFrame:
-        """OpenAPI 當日列（JSON，中文欄位同 CSV header）。"""
+        """OpenAPI 當日列（UTF-8 JSON；實測回**英文鍵**，時段值仍為中文）。"""
         commodity = self._commodity(instrument)
         resp = self._session.get(_OPENAPI_URL, headers=_UA, timeout=30)
         resp.raise_for_status()
@@ -195,8 +262,8 @@ class TaifexAdapter(DataSourceAdapter):
         w.writeheader()
         for r in recs:
             w.writerow(r)
-        return self._parse_csv(buf.getvalue().encode("big5", errors="replace"),
-                               commodity=commodity)
+        # 直接傳 str：JSON 為 UTF-8，經 big5 轉碼會把非 big5 字元吃成 '?'
+        return self._parse_csv(buf.getvalue(), commodity=commodity)
 
     # ---------------------------------------------------------------- fetch
 
