@@ -168,6 +168,19 @@ class BacktestEngine:
                     "重建連續層以補齊欄位（spec 011 FR-008）。"
                 )
 
+        def cost_basis_price(bar_row, side, exec_price, *, field='open'):
+            """摩擦成本（期交稅）的價格基準（spec 011 FR-005）。
+
+            期貨：取同根**未調整**價再套同一滑價——稅基是成交契約金額，須反映
+            當年真實市價；back-adjust 後的水位會使稅額失真（早年負價位甚至算出
+            負稅額）。滑價為點數加減，故兩基準的偏移量一致、自洽。
+            現貨：維持成交價（008b 位元不變承諾）。
+            每口定額手續費不吃價格，不受本函式影響。
+            """
+            if not is_futures:
+                return exec_price
+            return cost_model.slip(float(bar_row[f'unadj_{field}']), side)
+
         if verbose:
             print("開始進行策略回測...")
 
@@ -316,7 +329,8 @@ class BacktestEngine:
                         continue
 
                     cost = position_shares * execution_price
-                    entry_costs = cost_model.entry_costs(execution_price, position_shares)
+                    entry_costs = cost_model.entry_costs(
+                        cost_basis_price(row, "buy", execution_price), position_shares)
                     fee = entry_costs.commission
                     if is_futures:
                         # 期貨：不付名目、僅扣摩擦成本（保證金為佔用而非支出）
@@ -376,7 +390,8 @@ class BacktestEngine:
                         })
                         continue
 
-                    entry_costs = cost_model.entry_costs(execution_price, position_shares)
+                    entry_costs = cost_model.entry_costs(
+                        cost_basis_price(row, "sell", execution_price), position_shares)
                     capital -= entry_costs.total   # 期貨：僅扣摩擦成本、不付名目
 
                     pm.is_active = True
@@ -438,7 +453,9 @@ class BacktestEngine:
                     if shares_to_sell > 0.0:
                         revenue = shares_to_sell * execution_price
 
-                        exit_costs = cost_model.exit_costs(execution_price, shares_to_sell)
+                        exit_costs = cost_model.exit_costs(
+                            cost_basis_price(row, "buy" if is_short_pos else "sell",
+                                             execution_price), shares_to_sell)
                         commission = exit_costs.commission
                         tax = exit_costs.tax
 
@@ -474,7 +491,9 @@ class BacktestEngine:
                     shares_sold = position_shares
                     revenue = shares_sold * execution_price
 
-                    exit_costs = cost_model.exit_costs(execution_price, shares_sold)
+                    exit_costs = cost_model.exit_costs(
+                        cost_basis_price(row, "buy" if is_short_pos else "sell",
+                                         execution_price), shares_sold)
                     commission = exit_costs.commission
                     tax = exit_costs.tax
 
@@ -521,7 +540,10 @@ class BacktestEngine:
                 if current_equity <= 0.0:
                     if position_shares > 0.0:
                         forced_price = row['close']
-                        forced_costs = cost_model.exit_costs(forced_price, position_shares)
+                        forced_costs = cost_model.exit_costs(
+                            cost_basis_price(row, "buy" if pm.direction == -1 else "sell",
+                                             forced_price, field='close'),
+                            position_shares)
                         if pm.direction == -1:
                             realized = position_shares * (pm.entry_price - forced_price) * point_value
                             forced_action = "COVER_ALL"

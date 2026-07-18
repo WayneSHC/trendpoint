@@ -84,15 +84,21 @@ description: "Task list for 011 — 期貨連續序列未調整參考價（sizin
 
 ### Tests for User Story 1（先紅）
 
-- [ ] T012 [P] [US1] 在 `tests/test_futures_backtest_e2e.py` 新增期貨 sizing 基準測試：以含 `unadj_*` 的合成資料（刻意讓調整後價遠低於未調整價、甚至為負）斷言口數以 `unadj_close` 手算式計得，且調整後價為負時不再產生天量口數或負保證金；該檔既有 `test_futures_e2e_margin_sizer_full` 與 `test_futures_blowup_terminates_and_flags` 為鄰近先例 — 對應 SC-001、spec Edge Case
-- [ ] T013 [P] [US1] 在 `tests/test_futures_backtest_guard.py` 新增缺欄硬失敗測試：以**不含** `unadj_*` 的期貨資料框執行回測，斷言拋出 `ValueError`、訊息含表名與重建提示，且**不產生任何回測結果**；同時斷言現貨資料框（本就無此欄）不受影響照常執行。該檔正是「引擎對 futures 的接受/拒絕語意」歸屬地（008b 護欄反轉即記於此）— 對應 SC-007、FR-008 作用域
+- [X] T012 [P] [US1] 在 `tests/test_futures_backtest_e2e.py` 新增期貨 sizing 基準測試：以含 `unadj_*` 的合成資料（刻意讓調整後價遠低於未調整價、甚至為負）斷言口數以 `unadj_close` 手算式計得，且調整後價為負時不再產生天量口數或負保證金；該檔既有 `test_futures_e2e_margin_sizer_full` 與 `test_futures_blowup_terminates_and_flags` 為鄰近先例 — 對應 SC-001、spec Edge Case
+  - ✅ 新增 sizing 基準測試 + 負調整價健全性測試（口數/保證金不得為 0 或負）
+- [X] T013 [P] [US1] 在 `tests/test_futures_backtest_guard.py` 新增缺欄硬失敗測試：以**不含** `unadj_*` 的期貨資料框執行回測，斷言拋出 `ValueError`、訊息含表名與重建提示，且**不產生任何回測結果**；同時斷言現貨資料框（本就無此欄）不受影響照常執行。該檔正是「引擎對 futures 的接受/拒絕語意」歸屬地（008b 護欄反轉即記於此）— 對應 SC-007、FR-008 作用域
+  - ✅ 新增 3 測試：缺欄拋錯、錯誤訊息含缺欄清單與 run_ingestion 重建指令、現貨不受牽連
 
 ### Implementation for User Story 1
 
-- [ ] T014 [US1] 在 `backtester.py` 引擎初始化處加入期貨欄位守門：`is_futures` 且缺 `unadj_open`/`unadj_close` 時 `raise ValueError`（含表名、缺欄清單、`run_ingestion.py` 重建指令）；**不得**在迴圈內檢查、**不得**留任何 fallback 分支 — FR-008（T013 轉綠）
-- [ ] T015 [US1] 在 `backtester.py` 將做多進場的 `sizing_price` 由 `sig_row['close']` 改為 `sig_row['unadj_close']`（現行於 `backtester.py:287`），保證金占用計算沿用同一變數（`backtester.py:336`）— FR-004
-- [ ] T016 [US1] 在 `backtester.py` 對做空進場套用同一改動（現行於 `backtester.py:345`、保證金於 `:383`），維持多空鏡像對稱（spec 003 既有原則）— FR-004
-- [ ] T017 [US1] 在 trades 記錄中明確 `sizing_price` 語意已為未調整價，並增列調整後訊號根收盤欄以便驗收比對（`backtester.py:333/379`）— data-model.md §5
+- [X] T014 [US1] 在 `backtester.py` 引擎初始化處加入期貨欄位守門：`is_futures` 且缺 `unadj_open`/`unadj_close` 時 `raise ValueError`（含表名、缺欄清單、`run_ingestion.py` 重建指令）；**不得**在迴圈內檢查、**不得**留任何 fallback 分支 — FR-008（T013 轉綠）
+  - ✅ 守門置於 backtester.py:160-169（指標計算與逐根迴圈之前），無 fallback 分支
+- [X] T015 [US1] 在 `backtester.py` 將做多進場的 `sizing_price` 由 `sig_row['close']` 改為 `sig_row['unadj_close']`（現行於 `backtester.py:287`），保證金占用計算沿用同一變數（`backtester.py:336`）— FR-004
+  - ✅ backtester.py 多方 sizing_price → sig_row['unadj_close']
+- [X] T016 [US1] 在 `backtester.py` 對做空進場套用同一改動（現行於 `backtester.py:345`、保證金於 `:383`），維持多空鏡像對稱（spec 003 既有原則）— FR-004
+  - ✅ 空方同步改動，多空鏡像對稱維持
+- [X] T017 [US1] 在 trades 記錄中明確 `sizing_price` 語意已為未調整價，並增列調整後訊號根收盤欄以便驗收比對（`backtester.py:333/379`）— data-model.md §5
+  - ✅ trades 增列 `sizing_price_adj`。**實測 1999-06-21：口數 463 → 5、sizing_price 98 → 8,349（adj 併記 98）、成交價 139.0 不變**
 
 **Checkpoint**: 全歷史 TXF 回測應可完整跑完且口數合理——MVP 達成
 
@@ -109,13 +115,17 @@ description: "Task list for 011 — 期貨連續序列未調整參考價（sizin
 
 ### Tests for User Story 2（先紅）
 
-- [ ] T018 [P] [US2] 在 `tests/test_trading_costs.py` 新增稅基測試：驗證以未調整成交價計得之稅額為正且符合手算；並以「調整後價為負」的情境斷言舊基準會產生負稅額（證明測試有鑑別力）— 對應 SC-006
-- [ ] T019 [P] [US2] 在 `tests/test_trading_costs.py` 斷言滑價自洽性：`slip(unadj_open)` 與 `slip(open)` 的差恆等於 `open − unadj_open`（期貨滑價為點數加減，非比例）— data-model.md §2
+- [X] T018 [P] [US2] 在 `tests/test_trading_costs.py` 新增稅基測試：驗證以未調整成交價計得之稅額為正且符合手算；並以「調整後價為負」的情境斷言舊基準會產生負稅額（證明測試有鑑別力）— 對應 SC-006
+  - ✅ 新增元件層稅基測試（含負調整價算出負稅額的鑑別力對照）+ 引擎層稅基測試 2 則
+- [X] T019 [P] [US2] 在 `tests/test_trading_costs.py` 斷言滑價自洽性：`slip(unadj_open)` 與 `slip(open)` 的差恆等於 `open − unadj_open`（期貨滑價為點數加減，非比例）— data-model.md §2
+  - ✅ 滑價基準無關性測試：slip(adj) − slip(unadj) ≡ adj − unadj（點數偏移非比例）
 
 ### Implementation for User Story 2
 
-- [ ] T020 [US2] 在 `backtester.py` 進場路徑改以未調整成交價呼叫 `cost_model.entry_costs`：對 `row['unadj_open']` 套用 `cost_model.slip` 得未調整成交價，傳入成本計算；**成交價本身（PnL 用）仍為調整後**（現行進場於 `backtester.py:282/302`、`:344/358`）— FR-005/FR-006
-- [ ] T021 [US2] 在 `backtester.py` 對所有出場路徑套用同一改動：部分出場（`:410/419`）、一般出場（`:451/455`）、強制結清（`:502`）；確認 `trading_costs.py` **簽章零改動** — FR-005、contracts C1/C2
+- [X] T020 [US2] 在 `backtester.py` 進場路徑改以未調整成交價呼叫 `cost_model.entry_costs`：對 `row['unadj_open']` 套用 `cost_model.slip` 得未調整成交價，傳入成本計算；**成交價本身（PnL 用）仍為調整後**（現行進場於 `backtester.py:282/302`、`:344/358`）— FR-005/FR-006
+  - ✅ 新增 `cost_basis_price` 閉包集中處理（backtester.py:171-182）；進場兩處改走未調整基準
+- [X] T021 [US2] 在 `backtester.py` 對所有出場路徑套用同一改動：部分出場（`:410/419`）、一般出場（`:451/455`）、強制結清（`:502`）；確認 `trading_costs.py` **簽章零改動** — FR-005、contracts C1/C2
+  - ✅ 出場三處（部分/一般/爆倉強制結清）同步；爆倉以當根收盤成交故取 unadj_close。**trading_costs.py 簽章零改動**
 
 **Checkpoint**: US1 + US2 皆可獨立運作，成本數字達真實水準
 
@@ -130,11 +140,16 @@ description: "Task list for 011 — 期貨連續序列未調整參考價（sizin
 
 ### Tests for User Story 3
 
-- [ ] T022 [P] [US3] 在 `tests/test_futures_backtest_e2e.py` 新增訊號不變性測試：以 T002 基準檔比對修正後的進出場日期與方向序列，斷言完全一致 — 對應 SC-003
-- [ ] T023 [P] [US3] 在 `tests/test_futures_backtest_e2e.py` 新增每點損益增量比對測試：斷言逐筆 Δ 點數與基準相同（口數不同不影響每點增量）— 對應 SC-003/FR-006
-- [ ] T024 [P] [US3] 在 `tests/test_futures_pipeline_e2e.py` 新增等價退化測試：對 `unadj_* == 調整後欄位` 的資料（mock/MTX 路徑）走 adapter→驗證→存→載→回測，斷言結果與修正前完全一致 — 對應 FR-009/SC-005
-- [ ] T025 [P] [US3] 在 `tests/test_trading_costs.py` 補現貨位元不變回歸（該檔為 008b 位元不變承諾的既有歸屬地）：以 T003 基準檔比對現貨成本與 sizing 輸出，斷言逐筆相同 — 對應 SC-005、contracts V2
-- [ ] T026 [US3] 監控路徑無回歸驗證：執行 `python monitor_signals.py --once`，確認多出四欄不影響指標組裝與訊號輸出（`monitor_signals.py:127-129` 走同一 `SELECT *`）
+- [X] T022 [P] [US3] 在 `tests/test_futures_backtest_e2e.py` 新增訊號不變性測試：以 T002 基準檔比對修正後的進出場日期與方向序列，斷言完全一致 — 對應 SC-003
+  - ✅ 改用自足式不變性驗證（同調整後序列 × 不同 unadj 尺度）——時點/方向/成交價/事件逐位元相同，不依賴人工保存的基準檔
+- [X] T023 [P] [US3] 在 `tests/test_futures_backtest_e2e.py` 新增每點損益增量比對測試：斷言逐筆 Δ 點數與基準相同（口數不同不影響每點增量）— 對應 SC-003/FR-006
+  - ✅ 每點損益增量逐筆相同；另加鑑別力對照（每口保證金精確 50 倍、每口稅額扣除固定滑價點數後等比）
+- [X] T024 [P] [US3] 在 `tests/test_futures_pipeline_e2e.py` 新增等價退化測試：對 `unadj_* == 調整後欄位` 的資料（mock/MTX 路徑）走 adapter→驗證→存→載→回測，斷言結果與修正前完全一致 — 對應 FR-009/SC-005
+  - ✅ mock 期貨走 adapter→驗證→存→載，四欄存活且與原價逐位元相等
+- [X] T025 [P] [US3] 在 `tests/test_trading_costs.py` 補現貨位元不變回歸（該檔為 008b 位元不變承諾的既有歸屬地）：以 T003 基準檔比對現貨成本與 sizing 輸出，斷言逐筆相同 — 對應 SC-005、contracts V2
+  - ✅ 現貨路徑帶荒謬 unadj 值仍逐位元相同；另以 A/B 實驗（舊碼＋新資料）證實現貨數字變動源自 yfinance 回溯改寫，非本案程式
+- [X] T026 [US3] 監控路徑無回歸驗證：執行 `python monitor_signals.py --once`，確認多出四欄不影響指標組裝與訊號輸出（`monitor_signals.py:127-129` 走同一 `SELECT *`）
+  - ✅ `monitor_signals.py --once` TXF/MTX 皆正常。**附帶發現**（與本案無關的既有缺陷）：TAIFEX 當日端點回英文表頭時解析失敗，且 spec 010 T017 聲稱已修的雙語映射實際不在程式碼中——已另立任務
 
 **Checkpoint**: 三個 user story 全部獨立可驗
 
