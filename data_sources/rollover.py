@@ -14,10 +14,21 @@ TrendPoint - 期貨連續月拼接引擎 (spec 010)
    前一日收盤差）。
 3. build_continuous：各日取近月列，依事件差額回溯**累積**平移 O/H/L/C
    （量與未平倉不平移）——消除轉倉跳空、保持 Δ點正確；早期絕對水位可能 ≤ 0
-   （無害：系統僅消費相對變化，spec 010 Assumptions）。
+   （無害：**訊號與每點損益**僅消費相對變化，spec 010 Assumptions）。
+   同時輸出 unadj_open/high/low/close＝平移前的原始近月價（spec 011 FR-001）。
+
+兩組價格的分工（spec 011）：
+- 調整後 open/high/low/close：訊號判定與每點損益。跨轉倉連續，但早年絕對
+  水位嚴重偏離當年真實價（TXF 實測最低 −5,312）。
+- unadj_*：口數 sizing、保證金、期交稅——凡「價位 × 合約乘數」型的名目值
+  計算都必須用它，否則保證金會被低估數十倍（spec 010 T017 實測 463 口爆倉）。
+
+**禁止**由「調整後價 − 位移量」回推 unadj_*（FR-011）：位移量等於該時點之後
+所有轉倉調整的總和，屬未來資訊且非截斷不變；原始價則恆為當下可知。
 
 看前紀律（憲章 I / FR-004）：判定僅用前一交易日資訊——截斷尾段不改變既往
-近月選擇序列（back-adjust 平移基準隨尾端而異屬預期，斷言以近月序列為準）。
+近月選擇序列（back-adjust 平移基準隨尾端而異屬預期，斷言以近月序列為準；
+unadj_* 則截斷不變，見 tests/test_rollover.py 之 SC-008 測試）。
 """
 
 from __future__ import annotations
@@ -112,15 +123,19 @@ def build_continuous(raw: pd.DataFrame, front: pd.Series,
             r = indexed.loc[(d, c)]
         except KeyError as e:
             raise ValueError(f"連續序列缺列：{d.date()} × '{c}'") from e
+        o, h, l, c = (float(r["open"]), float(r["high"]),
+                      float(r["low"]), float(r["close"]))
         rows.append({
             "date": d,
-            "open": float(r["open"]), "high": float(r["high"]),
-            "low": float(r["low"]), "close": float(r["close"]),
+            "open": o, "high": h, "low": l, "close": c,
             "volume": float(r["volume"]),
+            # spec 011 FR-001：平移前擷取的原始價，供 sizing/保證金/期交稅使用
+            "unadj_open": o, "unadj_high": h, "unadj_low": l, "unadj_close": c,
         })
     cont = pd.DataFrame(rows).set_index("date")
 
     # 回溯累積平移：每一事件對其生效日**之前**的所有列加上 adjustment
+    # unadj_* 不在 price_cols 內——它們必須保持原始值（FR-001/FR-011）
     price_cols = ["open", "high", "low", "close"]
     for ev in events:
         mask = cont.index < ev.roll_date

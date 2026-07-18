@@ -485,3 +485,121 @@ def test_short_entry_sizing_and_execution_no_lookahead():
     assert tfirst["datetime"] == first["datetime"]
     assert tfirst["shares"] == first["shares"]
     assert tfirst["price"] == first["price"]
+
+
+# ---------------------------------------------------------------------------
+# spec 011（FR-007 / FR-011 / SC-008）：未調整參考價之看前偏誤防線
+#
+# 未調整價是 sizing／保證金／期交稅的名目值基準。若它含有未來資訊，整條
+# 摩擦成本鏈都會被污染。本節證明：直接攜帶的原始價截斷不變，而「調整後價
+# − 位移量」的回推路徑會隨尾端而變——這就是 FR-011 禁止回推的實證理由。
+# ---------------------------------------------------------------------------
+
+def _txf_like_raw():
+    """兩次轉倉的最小 per-contract 原始長表（數字手算，見 test_rollover 情境）。"""
+    rows = [
+        ("2023-01-02", "202301", 100.0, 100), ("2023-01-02", "202302", 108.0, 10),
+        ("2023-01-03", "202301", 102.0, 80),  ("2023-01-03", "202302", 110.0, 90),
+        ("2023-01-04", "202301", 103.0, 5),   ("2023-01-04", "202302", 111.0, 95),
+        ("2023-01-05", "202302", 112.0, 90),  ("2023-01-05", "202303", 118.0, 20),
+        ("2023-01-06", "202302", 113.0, 50),  ("2023-01-06", "202303", 120.0, 60),
+        ("2023-01-09", "202302", 114.0, 10),  ("2023-01-09", "202303", 121.0, 80),
+        ("2023-01-10", "202303", 122.0, 90),
+        ("2023-01-11", "202303", 123.0, 95),
+    ]
+    return pd.DataFrame([
+        {"date": pd.Timestamp(d), "contract": c,
+         "open": px - 1.0, "high": px + 2.0, "low": px - 2.0, "close": px,
+         "volume": float(v)}
+        for d, c, px, v in rows
+    ])
+
+
+def _continuous(raw):
+    from data_sources.rollover import (build_continuous, compute_roll_events,
+                                       select_front_month)
+    front = select_front_month(raw)
+    return build_continuous(raw, front, compute_roll_events(raw, front))
+
+
+def test_unadjusted_sizing_basis_carries_no_future_information():
+    """FR-011：sizing／稅的價格基準不得隨「未來有多少資料」而改變。
+
+    截斷於第二次轉倉之前重建，既往各根的 unadj_* 必須逐位元相同。
+    """
+    raw = _txf_like_raw()
+    full = _continuous(raw)
+
+    cut = pd.Timestamp("2023-01-05")           # 第二次轉倉（01-09）尚未發生
+    sub = _continuous(raw[raw["date"] <= cut])
+
+    joint = sub.index
+    for col in ("unadj_open", "unadj_high", "unadj_low", "unadj_close"):
+        pd.testing.assert_series_equal(
+            sub[col], full.loc[joint, col], check_exact=True,
+            obj=f"{col} 隨尾端改變 → 含未來資訊，違反憲章 I")
+
+
+def test_offset_derivation_would_leak_future_information():
+    """反證：若以「調整後價 − 位移量」回推未調整價，結果會隨尾端改變。
+
+    這是 FR-011 存在的理由——位移量 = 該時點之後所有轉倉調整之總和，
+    是未來事件的函數。本測試若失敗（回推也不變），表示 fixture 未涵蓋
+    截斷點之後的轉倉事件，防線失去意義。
+    """
+    raw = _txf_like_raw()
+    full = _continuous(raw)
+    cut = pd.Timestamp("2023-01-05")
+    sub = _continuous(raw[raw["date"] <= cut])
+    joint = sub.index
+
+    # 位移量（= 調整後 − 未調整）在全量與截斷版本下並不相同
+    full_offset = (full.loc[joint, "close"] - full.loc[joint, "unadj_close"])
+    sub_offset = (sub["close"] - sub["unadj_close"])
+    assert not np.allclose(full_offset.values, sub_offset.values), (
+        "位移量未隨截斷改變 → fixture 未涵蓋截斷點之後的轉倉，"
+        "本反證失效（請確認 cut 落在第二次轉倉之前）")
+
+    # 而直接攜帶的未調整價不受影響（對照 test_unadjusted_sizing_basis_...）
+    assert np.allclose(full.loc[joint, "unadj_close"].values,
+                       sub["unadj_close"].values)
+
+
+def test_futures_sizing_uses_unadjusted_close_of_signal_bar():
+    """FR-004：期貨口數以訊號根**未調整**收盤價計名目值。
+
+    構造：未調整價恆為真實水準（~100），調整後價被平移到極低水準（~2）。
+    若 sizing 誤用調整後價，口數會暴增約 50 倍——正是 spec 010 T017 的爆倉成因。
+    """
+    from acceptance_fixtures import make_klines, with_unadj
+    from config.config import FuturesCostConfig
+    from instruments import ContractSpec
+    from trading_costs import FuturesCostModel, FuturesSizer
+
+    base = make_klines(300, freq="5min")
+    df = with_unadj(base)
+    shift = float(base["low"].min()) - 2.0          # 平移後調整價逼近 0（不穿零）
+    for col in ("open", "high", "low", "close"):
+        df[col] = base[col] - shift                  # 訊號形狀不變（等量平移）
+
+    txc = ContractSpec(point_value=200.0, tick_size=1.0, exchange_fee_per_lot=20.0)
+    cfg = FuturesCostConfig()
+    res = BacktestEngine(initial_capital=10_000_000.0).run_backtest(
+        df, asset_class="futures",
+        cost_model=FuturesCostModel(txc, cfg), sizer=FuturesSizer(txc, cfg),
+        point_value=200.0, verbose=False,
+    )
+    buys = res["trades"]
+    buys = buys[buys["action"] == "BUY"]
+    assert not buys.empty, "fixture 應觸發期貨進場"
+    first = buys.iloc[0]
+    k = df.index.get_loc(first["datetime"])
+
+    # sizing 基準 = 訊號根（k−1）之**未調整**收盤，而非被平移的調整後收盤
+    assert first["sizing_price"] == pytest.approx(float(df["unadj_close"].iloc[k - 1]))
+    assert first["sizing_price"] != pytest.approx(float(df["close"].iloc[k - 1]))
+
+    # 口數以未調整價手算可驗（floor(權益 × 使用率 ÷ 每口保證金)）
+    per_lot = first["sizing_price"] * 200.0 * cfg.margin_rate
+    assert first["shares"] == pytest.approx(
+        float(int(10_000_000.0 * cfg.margin_utilization / per_lot)))

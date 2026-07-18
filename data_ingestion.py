@@ -107,6 +107,8 @@ def validate_data_contract(df: pd.DataFrame, *, quality=None, asset_class="equit
     - 必須包含 datetime 索引 (DatetimeIndex)
     - 欄位必須完整包含 open, high, low, close, volume
     - 價格必須為正（>0）；成交量不可為負（允許 0）
+    - 未調整參考價 unadj_*（若存在）必須嚴格為正且有限，且**不受**
+      allow_nonpositive_prices 豁免（spec 011 FR-003）
     - 不能含有 NaN 缺失值
     - 相鄰收盤跳動不得超過 max_close_jump_ratio（離群值防呆，憲法 VI）
 
@@ -154,6 +156,24 @@ def validate_data_contract(df: pd.DataFrame, *, quality=None, asset_class="equit
             raise ValueError(f"資料合約驗證失敗：欄位 {col} 包含非正價格（<= 0）")
     if (df["volume"] < 0.0).any():
         raise ValueError("資料合約驗證失敗：欄位 volume 包含負數值")
+
+    # 4b. 未調整參考價（spec 011 FR-003）：若欄位存在則必須嚴格為正且有限。
+    # **不受 allow_nonpositive_prices 豁免**——該豁免只為 back-adjust 後的相對
+    # 價序列而開，unadj_* 是當日近月契約的真實市價，非正即為資料異常。
+    # 欄位不存在時跳過：現貨與本功能實作前的資料本就沒有這些欄位（FR-008 作用域）。
+    for col in [f"unadj_{c}" for c in price_cols]:
+        if col not in df.columns:
+            continue
+        if not np.isfinite(df[col]).all():
+            raise ValueError(f"資料合約驗證失敗：欄位 {col} 包含非有限數值（NaN/inf）")
+        bad = df[col] <= 0.0
+        if bad.any():
+            ts = df.index[bad][0]
+            val = df[col][bad].iloc[0]
+            logger.warning("資料離群：未調整參考價 %s 於 %s 出現非正值 %.6g", col, ts, val)
+            raise ValueError(
+                f"資料合約驗證失敗：欄位 {col} 包含非正價格（<= 0）"
+                "——未調整參考價為真實市價，不適用 back-adjust 負價豁免")
 
     # 5. 相鄰收盤跳動離群偵測（閾值集中於 config，憲法 V；spec 008a：per-asset-class）
     # spec 010（D8）：back-adjust 連續序列早期絕對價可穿零（實測 1998 起 close 低至

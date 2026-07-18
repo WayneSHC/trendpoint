@@ -34,9 +34,12 @@ description: "Task list for 011 — 期貨連續序列未調整參考價（sizin
 **Purpose**: 備妥 raw 資料與「修正前」對照基準。基準一旦錯過就無法重建
 （改碼後舊行為即消失），故必須最先做。
 
-- [ ] T001 複製全歷史 raw 資料庫到工作目錄：`cp ".claude/worktrees/awesome-liskov-efbdf6/trendpoint.db" "./trendpoint.db"`，並以 `sqlite3` 確認 `fut_TXF_raw_daily` 為 34,722 列、`fut_TXF_daily` 為 6,947 根且**僅有** `datetime/open/high/low/close/volume` 六欄（此即 FR-008 硬失敗的現況測資）
-- [ ] T002 擷取「修正前」基準：以現況程式碼執行 `python run_backtest.py`（TXF），將 trades/equity CSV 另存為 `specs/011-unadjusted-sizing-price/baseline/` 下的對照檔，並在檔頭記錄 commit SHA；此為 SC-003 的比對來源
-- [ ] T003 [P] 記錄現況現貨回測輸出（任一 equity 標的）作為 008b 位元不變回歸的對照，存於同一 baseline 目錄
+- [X] T001 複製全歷史 raw 資料庫到工作目錄：`cp ".claude/worktrees/awesome-liskov-efbdf6/trendpoint.db" "./trendpoint.db"`，並以 `sqlite3` 確認 `fut_TXF_raw_daily` 為 34,722 列、`fut_TXF_daily` 為 6,947 根且**僅有** `datetime/open/high/low/close/volume` 六欄（此即 FR-008 硬失敗的現況測資）
+  - ✅ 實測：34,722 / 6,947 / 六欄無 `unadj_*`，與 010 T017 記錄一致
+- [X] T002 擷取「修正前」基準：以現況程式碼執行 `python run_backtest.py`，將 trades/equity CSV 另存至 **`data/011-baseline/`**（改置於已 gitignore 的 `data/`，避免可再生成產物入版控——憲章 VI），並記錄 commit SHA 於 `BASELINE_INFO.txt`；此為 SC-003 的比對來源
+  - ✅ 實測（commit `4bd14a2`）：TXF 總報酬 **−636.06%**、進場 2 次、**單次口數 max 463**、佔用保證金 max 2,733,412 元、**觸發爆倉**。首筆 `1999-06-21,BUY,463.0,price=139.0,sizing_price=98.0` — bug 完整重現，與 010 T017 逐字吻合
+- [X] T003 [P] 記錄現況現貨回測輸出作為 008b 位元不變回歸的對照，存於同一 baseline 目錄
+  - ✅ 實測：2330 +26.70%／0050 +0.66%／00878 +1.55%／00919 +9.14%／00631L +36.44%；MTX（mock 期貨）+9.16%、10 口
 
 **Checkpoint**: raw 在庫、修正前行為已凍結成檔，可以開始改碼
 
@@ -49,14 +52,22 @@ description: "Task list for 011 — 期貨連續序列未調整參考價（sizin
 
 **⚠️ CRITICAL**: 本階段未完成前，任何 user story 都無法開始
 
-- [ ] T004 [P] 在 `tests/test_rollover.py` 新增未調整欄位透傳測試（**先紅**）：以手算小資料框斷言 `build_continuous` 輸出含 `unadj_open/high/low/close`，且其值等於對應日近月契約的原始 OHLC（不受平移影響）— 對應 SC-002
-- [ ] T005 [P] 在 `tests/test_rollover.py` 新增**截斷不變性**測試（先紅）：對同一 raw 取全量與截斷至第 k 根兩種輸入建構連續序列，斷言前 k 根的 `unadj_*` 完全相同；同時斷言調整後 `close` **允許**不同（對照組，證明測試有鑑別力）。寫法可沿用 `tests/test_acceptance_parity.py` 既有的前綴一致性範式（截斷點 i + `check_exact=True` 零容差）— 對應 SC-008
-- [ ] T006 在 `data_sources/rollover.py` 的 `build_continuous` 實作 `unadj_*` 四欄：於 `rows.append` 階段（回溯平移**之前**）擷取原始 OHLC，平移迴圈只作用於既有 `price_cols`，不得觸及 `unadj_*`；同步更新模組 docstring 說明兩組價格的用途分工 — FR-001（T004/T005 轉綠）
-- [ ] T007 [P] 在 `tests/test_lookahead_bias.py` 新增防禦測試（先紅→綠）：斷言 `unadj_*` 不得由「調整後價 − 位移量」導出——以截斷序列驗證未調整價不變、並斷言實作未讀取未來列 — FR-007/FR-011
-- [ ] T008 [P] 在 `tests/test_acceptance_data_quality.py` 新增測試（先紅）：`unadj_*` 存在且含非正值時，即使 `allow_nonpositive_prices=True` 仍須被擋下；調整後價含負值時仍照常放行 — 對應 FR-003
-- [ ] T009 在 `data_ingestion.py` 的 `validate_data_contract` 加入未調整欄位嚴格正值（且有限）檢查，**必須置於 `allow_nonpositive_prices` 提早 return 之前**（現行於 `data_ingestion.py:162-163` return），否則對連續層永遠不會執行 — FR-003（T008 轉綠）
-- [ ] T010 在 `run_ingestion.py` 通用資料路徑（非 taifex 分支）為 **futures 資產類別**補上 `unadj_* = 對應調整後欄位`，使 MTX/mock 與 csv 期貨來源亦具備此欄位；equity 路徑不得加此欄 — FR-009（MTX 不經 rollover，見 research.md D3）
-- [ ] T011 重建連續層：執行 `python run_ingestion.py`，確認 `fut_TXF_daily` 重建為 6,947 根且新增四欄、`fut_MTX_daily` 亦具備四欄；以 SQL 驗 `unadj_close <= 0 OR unadj_open <= 0` 計數為 0 — FR-002/SC-004
+- [X] T004 [P] 在 `tests/test_rollover.py` 新增未調整欄位透傳測試（**先紅**）：以手算小資料框斷言 `build_continuous` 輸出含 `unadj_open/high/low/close`，且其值等於對應日近月契約的原始 OHLC（不受平移影響）— 對應 SC-002
+  - ✅ 綠。錨定值 unadj_close=[100,102,111,112,113,121,122,123]（調整後為 115,117,118,119,120,121,122,123）
+- [X] T005 [P] 在 `tests/test_rollover.py` 新增**截斷不變性**測試（先紅）：對同一 raw 取全量與截斷至第 k 根兩種輸入建構連續序列，斷言前 k 根的 `unadj_*` 完全相同；同時斷言調整後 `close` **允許**不同（對照組，證明測試有鑑別力）。寫法可沿用 `tests/test_acceptance_parity.py` 既有的前綴一致性範式（截斷點 i + `check_exact=True` 零容差）— 對應 SC-008
+  - ✅ 綠。截於 2023-01-05：unadj_* 逐位元相同；調整後 close 確實改變（鑑別力對照成立）
+- [X] T006 在 `data_sources/rollover.py` 的 `build_continuous` 實作 `unadj_*` 四欄：於 `rows.append` 階段（回溯平移**之前**）擷取原始 OHLC，平移迴圈只作用於既有 `price_cols`，不得觸及 `unadj_*`；同步更新模組 docstring 說明兩組價格的用途分工 — FR-001（T004/T005 轉綠）
+  - ✅ 實作於 rollover.py — 平移前擷取 o/h/l/c，`price_cols` 不含 unadj_*；模組 docstring 補兩組價格分工與 FR-011 禁令
+- [X] T007 [P] 在 `tests/test_lookahead_bias.py` 新增防禦測試（先紅→綠）：斷言 `unadj_*` 不得由「調整後價 − 位移量」導出——以截斷序列驗證未調整價不變、並斷言實作未讀取未來列 — FR-007/FR-011
+  - ✅ 新增 3 個測試於 test_lookahead_bias.py，含**反證**：位移量回推確實隨截斷改變（證明 FR-011 非過度設計）
+- [X] T008 [P] 在 `tests/test_acceptance_data_quality.py` 新增測試（先紅）：`unadj_*` 存在且含非正值時，即使 `allow_nonpositive_prices=True` 仍須被擋下；調整後價含負值時仍照常放行 — 對應 FR-003
+  - ✅ 新增 4 個測試於 test_acceptance_data_quality.py（含現貨無欄位不受影響之作用域測試）
+- [X] T009 在 `data_ingestion.py` 的 `validate_data_contract` 加入未調整欄位嚴格正值（且有限）檢查，**必須置於 `allow_nonpositive_prices` 提早 return 之前**（現行於 `data_ingestion.py:162-163` return），否則對連續層永遠不會執行 — FR-003（T008 轉綠）
+  - ✅ 實作於 data_ingestion.py — 檢查置於 allow_nonpositive_prices 提早 return **之前**
+- [X] T010 在 `run_ingestion.py` 通用資料路徑（非 taifex 分支）為 **futures 資產類別**補上 `unadj_* = 對應調整後欄位`，使 MTX/mock 與 csv 期貨來源亦具備此欄位；equity 路徑不得加此欄 — FR-009（MTX 不經 rollover，見 research.md D3）
+  - ✅ 實作於 run_ingestion.py 通用路徑（補 AssetClass 匯入）；MTX 已確認帶四欄
+- [X] T011 重建連續層：執行 `python run_ingestion.py`，確認 `fut_TXF_daily` 重建為 6,947 根且新增四欄、`fut_MTX_daily` 亦具備四欄；以 SQL 驗 `unadj_close <= 0 OR unadj_open <= 0` 計數為 0 — FR-002/SC-004
+  - ✅ 實測：fut_TXF_daily 6,947 根、四欄齊備、缺值 0、非正值 0；調整後負值仍 2,259 根（010 行為未變）。1999-06-21 調整後 188.0 vs 未調整 **8,439.0**（約 45 倍差距＝保證金低估倍率）
 
 **Checkpoint**: 資料層完備——連續表帶正確且恆正的未調整價，user story 可開工
 
@@ -136,7 +147,7 @@ description: "Task list for 011 — 期貨連續序列未調整參考價（sizin
 - [ ] T029 [P] 更新 `specs/010-taifex-real-data/tasks.md` T017 第 5 點的「已知限制」註記，標示已由 spec 011 解決並交叉連結
 - [ ] T030 [P] 更新 `CLAUDE.md` 專案地圖：移除 010 條目的「back-adjust 早年價位使 008b 保證金 sizing 失真」已知限制，改記 011 的兩組價格基準分工
 - [ ] T031 [P] 更新 `data_sources/rollover.py` 與 `trading_costs.py` 的模組 docstring，明載「調整後供訊號/PnL、未調整供 sizing/稅」的分工與 FR-011 禁止回推之理由
-- [ ] T032 清理 `specs/011-unadjusted-sizing-price/baseline/` 暫存對照檔（屬可再生成產物，不應入版控——確認 `.gitignore` 已涵蓋或改置於 scratchpad）
+- [ ] T032 確認 `data/011-baseline/` 未入版控（`data/` 已在 `.gitignore` 第 22 行涵蓋）；驗收數字已落檔於本檔各任務註記，基準 CSV 可安全刪除
 
 ---
 

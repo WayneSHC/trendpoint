@@ -58,6 +58,22 @@ def make_klines(n: int, freq: str = "5min", seed: int = 42) -> pd.DataFrame:
     )
 
 
+def with_unadj(df: pd.DataFrame) -> pd.DataFrame:
+    """補上未調整參考價欄位（spec 011 FR-009）：合成序列無 back-adjust，故 unadj_* = 原值。
+
+    期貨回測路徑要求資料攜帶 unadj_open/high/low/close（FR-008 缺欄硬失敗）。
+    真實 TXF 連續序列由 rollover.build_continuous 於平移前擷取；合成／mock 序列
+    沒有轉倉調整，兩組價格恆等——本 helper 即表述此等價退化。
+
+    刻意不併入 make_klines：新寫的期貨測試若忘了帶欄位，應該撞上硬失敗並讀到
+    錯誤訊息（從而知道有兩組價格基準），而不是默默通過。
+    """
+    out = df.copy()
+    for col in ("open", "high", "low", "close"):
+        out[f"unadj_{col}"] = out[col]
+    return out
+
+
 def make_klines_with_gap(
     n: int, gap_at: int, gap_len: int = 3, freq: str = "5min", seed: int = 42
 ) -> pd.DataFrame:
