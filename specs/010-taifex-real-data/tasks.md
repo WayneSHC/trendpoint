@@ -68,22 +68,22 @@ US1（TAIFEX 端到端 + 消費端切換）；US3（FinMind + 交叉驗證）。
 
 **Independent Test**: 離線測試綠 + V6 network 驗收（T017）。
 
-- [ ] T008 [P] [US1] `tests/test_taifex_source.py`（先寫先 FAIL）：fixture 解析（Big5、
+- [x] T008 [P] [US1] `tests/test_taifex_source.py`（先寫先 FAIL）：fixture 解析（Big5、
   欄位正規化、一般時段過濾、週契約排除）；欄位破壞 → fail-fast ValueError；重試語意
   （mock HTTP：失敗 max_retries 次後 RuntimeError、成功前 sleep 節流可注入 0）；
   另附 `@pytest.mark.network` 小區間真實 e2e（CI 跳過）
-- [ ] T009 [US1] `data_sources/taifex_source.py`：`TaifexAdapter`（fetch_raw 逐月
+- [x] T009 [US1] `data_sources/taifex_source.py`：`TaifexAdapter`（fetch_raw 逐月
   POST+Big5+節流+重試；fetch_latest OpenAPI JSON；fetch = fetch_raw 全區間→rollover
   三步→連續序列；timeframe 僅 daily）；自 registry 註冊 source_key="taifex"
-- [ ] T010 [US1] `run_ingestion.py` futures 真源分流：raw 表空 → 回填
+- [x] T010 [US1] `run_ingestion.py` futures 真源分流：raw 表空 → 回填
   （backfill_start～今日）；非空 → 自最後日期補至今日；raw 以（date×contract）冪等寫入
   `raw_table_name_for`；每次更新後重建連續序列 → 放寬版品質契約 → 整表覆蓋
   `fut_TXF_daily`；mock/csv/yfinance 路徑逐字不變
-- [ ] T011 [P] [US1] `tests/test_real_data_integration.py`（先寫先 FAIL）：含負價之連續
+- [x] T011 [P] [US1] `tests/test_real_data_integration.py`（先寫先 FAIL）：含負價之連續
   序列過品質契約（SC-007）；taifex 源 instrument 之監控訊息無 MOCK 前綴 + **監控取數
   走 DB 連續表＋fetch_latest（不呼叫重量 fetch()）**（離線 stub，SC-006 精修版）；
   DB 無資料 → 警告略過不回填；回測引擎直接消費連續序列跑通
-- [ ] T012 [US1] `config.yaml`：TXF source mock→taifex（**切換點**）+
+- [x] T012 [US1] `config.yaml`：TXF source mock→taifex（**切換點**）+
   `monitor_signals.py` 期貨取數分流（analyze H1：taifex 源 → 讀 DB 連續表＋
   fetch_latest 當日；mock/csv 源仍走 adapter.fetch；訊息/去重/前綴邏輯零改）；
   全套 pytest 綠 + 既有測試不依賴 config TXF source 之確認

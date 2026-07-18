@@ -19,8 +19,8 @@ data:
   instruments:
   - id: TXF
     asset_class: futures
-    source: mock
-    display_name: 台指期近月（mock）
+    source: taifex          # spec 010：真源（TAIFEX 官方）——run_ingestion 回填/增量、監控讀庫+當日端點
+    display_name: 臺股期貨
     timeframes:
     - daily
     contract:
