@@ -142,4 +142,14 @@ def run():
 
 
 if __name__ == "__main__":
+    import argparse
+    from datetime import timedelta as _td
+
+    parser = argparse.ArgumentParser(description="TrendPoint 數據抓取")
+    parser.add_argument("--verify", action="store_true",
+                        help="匯入後執行雙源交叉驗證（近 30 日；需 FINMIND_TOKEN，缺失則跳過）")
+    args = parser.parse_args()
     run()
+    if args.verify:
+        from verify_futures_data import run_and_report
+        run_and_report(date.today() - _td(days=30), date.today())

@@ -98,13 +98,13 @@ US1（TAIFEX 端到端 + 消費端切換）；US3（FinMind + 交叉驗證）。
 
 **Independent Test**: `pytest tests/test_finmind_source.py tests/test_verify_futures.py` 綠。
 
-- [ ] T013 [P] [US3] `tests/test_finmind_source.py`（先寫先 FAIL）：JSON 樣本解析
+- [x] T013 [P] [US3] `tests/test_finmind_source.py`（先寫先 FAIL）：JSON 樣本解析
   （欄位正規化同 raw schema）；`FINMIND_TOKEN` 缺失 → MissingTokenError
-- [ ] T014 [P] [US3] `tests/test_verify_futures.py`（先寫先 FAIL）：一致樣本零告警；
+- [x] T014 [P] [US3] `tests/test_verify_futures.py`（先寫先 FAIL）：一致樣本零告警；
   注入超差 → 告警列含兩源數值與 diff；token 缺失 → skipped=True 且記錄原因、不拋錯
-- [ ] T015 [US3] `data_sources/finmind_source.py`：`FinMindAdapter`（REST 直打免 SDK、
+- [x] T015 [US3] `data_sources/finmind_source.py`：`FinMindAdapter`（REST 直打免 SDK、
   token 環境變數、fetch_raw/fetch 同契約）；註冊 source_key="finmind"
-- [ ] T016 [US3] `verify_futures_data.py`：`cross_verify(start, end, tolerance)` +
+- [x] T016 [US3] `verify_futures_data.py`：`cross_verify(start, end, tolerance)` +
   CLI + 報表（stdout 摘要 + `data/verify_futures_report.csv`）；`run_ingestion.py`
   增 `--verify` 選項呼叫之
 
