@@ -39,3 +39,14 @@ def test_regex_rejects_illegal():
         assert not TABLE_NAME_PATTERN.match(bad)
         with pytest.raises(ValueError):
             validate_table_name(bad)
+
+
+def test_raw_table_name_for_futures_only():
+    """spec 010：raw 層表名（fut_{id}_raw_{tf}，現行 regex 已容納）；equity fail-fast。"""
+    from db_security import raw_table_name_for
+    fut = Instrument(id="TXF", asset_class=AssetClass.FUTURES, source="mock", contract=_C)
+    assert raw_table_name_for(fut, "daily") == "fut_TXF_raw_daily"
+    eq = equity_instrument("2330.TW")
+    import pytest as _pytest
+    with _pytest.raises(ValueError):
+        raw_table_name_for(eq, "daily")

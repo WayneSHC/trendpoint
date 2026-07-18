@@ -2,6 +2,12 @@ backtest:
   init_capital: 1000000.0
 data:
   database_path: trendpoint.db
+  # spec 010：期貨真實資料源參數（TAIFEX 回填/節流/重試 + 交叉驗證容差）
+  futures_source:
+    backfill_start: "1998-07-21"
+    throttle_seconds: 2.0
+    max_retries: 3
+    verify_tolerance: 0.0
   tickers:
   - 2330.TW
   - 0050.TW
@@ -13,8 +19,8 @@ data:
   instruments:
   - id: TXF
     asset_class: futures
-    source: mock
-    display_name: 台指期近月（mock）
+    source: taifex          # spec 010：真源（TAIFEX 官方）——run_ingestion 回填/增量、監控讀庫+當日端點
+    display_name: 臺股期貨
     timeframes:
     - daily
     contract:

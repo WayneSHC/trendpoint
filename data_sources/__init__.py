@@ -29,7 +29,8 @@ def _bootstrap() -> None:
     if _BOOTSTRAPPED:
         return
     _BOOTSTRAPPED = True
-    for mod in ("yfinance_source", "mock_source", "csv_source"):
+    for mod in ("yfinance_source", "mock_source", "csv_source",
+                "taifex_source", "finmind_source"):
         try:
             __import__(f"data_sources.{mod}")
         except ImportError:

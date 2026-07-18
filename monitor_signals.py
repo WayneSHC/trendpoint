@@ -121,7 +121,35 @@ def check_new_signals(ticker: str, alert_mgr: AlertManager, instrument=None):
     if is_futures:
         tf = "daily" if "daily" in instrument.timeframes else instrument.timeframes[0]
         print(f"\n正在載入期貨 {ticker}（{instrument.source}/{tf}）數據進行訊號分析...")
-        df = get_adapter(instrument.source).fetch(instrument, tf)
+        if instrument.source == "taifex":
+            # spec 010（analyze H1）：真源監控取數 = DB 連續表（歷史）+ 當日端點
+            # （至多 1 請求/輪詢）；**不得**呼叫重量 fetch()（會觸發全歷史回填）。
+            from db_security import safe_load_db_data, table_name_for
+            try:
+                df = safe_load_db_data(DB_PATH, table_name_for(instrument, tf))
+            except Exception:
+                df = None
+            if df is None or df.empty:
+                print(f"警告：{ticker} 連續表尚未回填（請先執行 run_ingestion），略過此標的。")
+                return
+            today = pd.Timestamp.now().normalize()
+            if df.index.max() < today:
+                try:
+                    latest_raw = get_adapter("taifex").fetch_latest(instrument)
+                except Exception as e:
+                    latest_raw = None
+                    print(f"提示：{ticker} 當日端點暫不可用（{e}），以既有入庫資料判定。")
+                if latest_raw is not None and not latest_raw.empty:
+                    # 當日近月近似：取當日量最大之月契約列（僅供訊號提示、不入庫；
+                    # 正式連續序列仍由 ingestion 之 rollover 引擎產生）
+                    top = latest_raw.sort_values("volume").iloc[-1]
+                    df = pd.concat([df, pd.DataFrame([{
+                        "open": top["open"], "high": top["high"],
+                        "low": top["low"], "close": top["close"],
+                        "volume": top["volume"],
+                    }], index=[pd.Timestamp(top["date"])])])
+        else:
+            df = get_adapter(instrument.source).fetch(instrument, tf)
         bar_interval = pd.Timedelta(days=1) if tf == "daily" else pd.Timedelta(minutes=5)
         if instrument.source == "mock":
             mock_prefix = "【MOCK 資料—dry-run】"

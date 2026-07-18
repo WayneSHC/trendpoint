@@ -17,6 +17,29 @@ from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from instruments import Instrument  # spec 008a：資產類別抽象
 
+class FuturesDataSourceConfig(BaseModel):
+    """
+    期貨真實資料源參數（spec 010）：回填/節流/重試/驗證容差。
+    FinMind token 走環境變數 FINMIND_TOKEN（安全鐵律：憑證不入 config 檔）。
+    """
+    backfill_start: str = Field(
+        default="1998-07-21",
+        description="歷史回填起始日（TX 上市日；clarify 定案全歷史，可調）"
+    )
+    throttle_seconds: float = Field(
+        default=2.0, ge=0.0,
+        description="TAIFEX 回填每請求間隔秒數（未公告限流之保守節流）"
+    )
+    max_retries: int = Field(
+        default=3, ge=0,
+        description="單一請求失敗重試次數；用罄後 fail-fast"
+    )
+    verify_tolerance: float = Field(
+        default=0.0, ge=0.0,
+        description="交叉驗證容差（TAIFEX vs FinMind 同源鏡像，預設全等）"
+    )
+
+
 class DataConfig(BaseModel):
     """
     資料來源與存儲設定
@@ -24,6 +47,10 @@ class DataConfig(BaseModel):
     database_path: str = Field(
         default="trendpoint.db",
         description="SQLite 資料庫檔案路徑"
+    )
+    futures_source: FuturesDataSourceConfig = Field(
+        default_factory=FuturesDataSourceConfig,
+        description="期貨真實資料源參數（spec 010）；預設齊全，既有 config 零改可載"
     )
     tickers: List[str] = Field(
         default_factory=lambda: ["2330.TW", "0050.TW"],
