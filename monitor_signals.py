@@ -143,11 +143,18 @@ def check_new_signals(ticker: str, alert_mgr: AlertManager, instrument=None):
                     # 當日近月近似：取當日量最大之月契約列（僅供訊號提示、不入庫；
                     # 正式連續序列仍由 ingestion 之 rollover 引擎產生）
                     top = latest_raw.sort_values("volume").iloc[-1]
-                    df = pd.concat([df, pd.DataFrame([{
-                        "open": top["open"], "high": top["high"],
-                        "low": top["low"], "close": top["close"],
-                        "volume": top["volume"],
-                    }], index=[pd.Timestamp(top["date"])])])
+                    bar_date = pd.Timestamp(top["date"])
+                    # 補值前提是「這根比庫內末根**新**」，而非上方「今天比末根晚」：
+                    # 非交易日（週末/假日）時鐘前進、端點回的仍是前一交易日那根，
+                    # 以時鐘為準會把同一根 append 第二次——階梯系統的 rolling 結構
+                    # 會把同一根算兩次，等同窗口位移一格而翻轉訊號判定。
+                    # 落後的日期同樣不補（會插入亂序列，rolling 一併失真）。
+                    if bar_date > df.index.max():
+                        df = pd.concat([df, pd.DataFrame([{
+                            "open": top["open"], "high": top["high"],
+                            "low": top["low"], "close": top["close"],
+                            "volume": top["volume"],
+                        }], index=[bar_date])])
         else:
             df = get_adapter(instrument.source).fetch(instrument, tf)
         bar_interval = pd.Timedelta(days=1) if tf == "daily" else pd.Timedelta(minutes=5)
