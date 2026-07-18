@@ -57,6 +57,21 @@ def test_contract_allows_negative_backadjusted_prices():
                                   allow_nonpositive_prices=True)
 
 
+def test_contract_skips_jump_ratio_on_backadjusted_series():
+    """全歷史 back-adjust 序列會穿零（實測 1998 起 close 低至 -5312），
+    pct_change 分母近零/為負使跳動比失義（inf/負比皆可能）——放寬模式必須跳過
+    相對跳動檢查（值正確性由 raw 層 + 雙源交叉驗證把關）。"""
+    idx = pd.date_range("1999-07-12", periods=5, freq="B")
+    crossing = pd.DataFrame(
+        {"open": [300.0, 30.0, -1.0, -270.0, -780.0],
+         "high": [305.0, 35.0, 2.0, -260.0, -770.0],
+         "low": [295.0, 25.0, -5.0, -275.0, -790.0],
+         "close": [299.0, 29.0, 0.0, -266.0, -783.0],   # 含 0 與跨號（ratio=inf/負）
+         "volume": [1000.0] * 5}, index=idx)
+    assert validate_data_contract(crossing, asset_class="futures",
+                                  allow_nonpositive_prices=True)
+
+
 def test_contract_still_rejects_nan_and_default_rejects_nonpositive():
     cont = _continuous_from_fixture()
     bad = cont.copy()

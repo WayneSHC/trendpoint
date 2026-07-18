@@ -156,6 +156,11 @@ def validate_data_contract(df: pd.DataFrame, *, quality=None, asset_class="equit
         raise ValueError("資料合約驗證失敗：欄位 volume 包含負數值")
 
     # 5. 相鄰收盤跳動離群偵測（閾值集中於 config，憲法 V；spec 008a：per-asset-class）
+    # spec 010（D8）：back-adjust 連續序列早期絕對價可穿零（實測 1998 起 close 低至
+    # -5312），pct_change 分母近零/為負使相對跳動比失義（inf/負比）——放寬模式下
+    # 跳過本檢查；值正確性由 raw 層正價檢查 + verify_futures_data 雙源交叉驗證把關。
+    if allow_nonpositive_prices:
+        return True
     if quality is None:
         from config import load_config
         quality = load_config().data_quality
