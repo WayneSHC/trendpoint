@@ -127,9 +127,15 @@ US1（TAIFEX 端到端 + 消費端切換）；US3（FinMind + 交叉驗證）。
 
 **T017 V6 網路驗收（全部如實記錄）**：
 
-1. `pytest -m network -q` 綠（1 passed）。過程中抓到**雙語表頭**問題：TAIFEX 同一
+1. `pytest -m network -q` 綠（1 passed）。~~過程中抓到**雙語表頭**問題：TAIFEX 同一
    `futDataDown` 端點隨 session 時而回中文、時而回英文表頭（英文收盤欄叫 `Last`）——
-   parser 已改雙語映射（commit `4479cd5` 前後系列）。
+   parser 已改雙語映射（commit `4479cd5` 前後系列）。~~
+   > **更正（2026-07-18，見下方「雙語表頭修正」）**：本點原記載不實，已刪去線。
+   > 查證結果：(a) `4479cd5` 不存在於任何分支歷史；(b) 當時 parser **並未**落地雙語
+   > 映射，`_COL_MAP` 全為中文鍵；(c) 回英文表頭的是 **OpenAPI 當日端點**
+   > （`/v1/DailyMarketReportFut`），非 `futDataDown`——後者當日實測仍回中文
+   > （`charset=MS950`）。因此 T017 當時的網路測試綠，是因為它未涵蓋英文表頭情境，
+   > 而非雙語映射已生效；缺陷延續至 2026-07-18 監控時才暴露。
 2. 全歷史回填：`fut_TXF_raw_daily` **34,722 列（1998-07-21 ~ 2026-07-17）**，
    ~340 請求 × 2s 節流，一次成功。
 3. 回填後連續序列被品質契約誤擋——back-adjust 累積位移使早期價格穿零
@@ -155,6 +161,50 @@ US1（TAIFEX 端到端 + 消費端切換）；US3（FinMind + 交叉驗證）。
 **T019**：`pytest -q` **182 passed, 1 deselected（network）** 全綠；
 quickstart V1–V5 由離線測試覆蓋（V1 解析錨定、V2 rollover 手算錨定、V3 監控紀律、
 V4 驗證器注入分歧、V5 負價契約）。
+
+---
+
+## 雙語表頭修正（2026-07-18，補 T017 第 1 點之未落地項）
+
+**觸發**：`python monitor_signals.py --once` 的 TXF 當日取數印出
+「TAIFEX CSV 格式異常：缺少欄位 ['交易日期', …]；實際欄位 ['Date', 'Contract', …]」，
+監控降級改用庫內既有資料（不中斷，但當日資料取不到）。
+
+**查證（實測，非推論）**：
+
+- `openapi.taifex.com.tw/v1/DailyMarketReportFut` → **英文鍵**
+  （收盤欄為 `Last`、到期月份為 `ContractMonth(Week)`、契約為 `Contract`），
+  UTF-8 JSON；但 `TradingSession` 的**值仍為中文**（`一般`/`盤後`）
+  ——故時段過濾邏輯不隨表頭語言改變（若當初照英文猜測值，盤後列會漏濾）。
+- `www.taifex.com.tw/cht/3/futDataDown` → 中文表頭，`Content-Type: charset=MS950`
+  （big5 超集）。當日實測未見英文表頭。
+- 缺值標記除 `""`/`-` 外，OpenAPI 另有 `NULL`（出現於盤後列的結算價）。
+
+**修正**：
+
+- `data_sources/taifex_source.py`：`_COL_MAP` 改為 `_SCHEMA_ZH` / `_SCHEMA_EN`
+  兩套 `_HeaderSchema`；`_select_schema` 依表頭挑選，**兩套皆不匹配才 fail-fast**，
+  錯誤訊息分別列出兩套各缺什麼。
+- 解碼由 `big5` 改 `ms950`（依端點自報編碼；big5 超集，向下相容）；
+  `fetch_latest` 改直接傳 `str` 給 parser，**移除 big5 轉碼往返**
+  （原本會把非 big5 字元吃成 `?` 而汙染資料）。
+- 缺值標記集合加入 `NULL`（原本會使該列硬失敗）。
+
+**測試（先紅後綠，5 個新測試）**：`tests/fixtures/taifex_sample_en_header.csv`
+（中文 fixture 的英文表頭孿生檔，資料列逐字沿用）斷言兩表頭解出的 DataFrame
+**完全相等**；`tests/fixtures/taifex_openapi_en_sample.json`（真實 OpenAPI 回應，
+僅留 TX 列）驗證 `fetch_latest` 全程；另含未知表頭 fail-fast、非 big5 字元、
+`NULL` 略過。
+
+**驗收**：`pytest -q` **186 passed, 1 skipped, 1 deselected** 全綠；
+`pytest -m network -q` **1 passed**（涵蓋 `fetch_raw` + `fetch_latest` 真實端點）；
+`monitor_signals.py --once` 不再出現「TAIFEX CSV 格式異常」。
+以監控同一路徑（`get_adapter("taifex").fetch_latest`）實測：回 6 筆月契約、
+盤後列已濾除（近月 202608 取到一般時段 close=42,725 而非盤後 44,715）。
+
+**如實補述**：本次 `monitor_signals.py --once` 執行時，worktree 內無 `trendpoint.db`，
+TXF 在讀連續表階段即 `return`，**未走到** `fetch_latest`；故「錯誤訊息消失」一項
+係由上述直接呼叫與 network 測試佐證，而非由該次監控執行本身佐證。
 
 ---
 

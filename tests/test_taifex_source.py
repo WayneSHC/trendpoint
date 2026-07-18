@@ -11,6 +11,7 @@ spec 010 — TAIFEX 主源 adapter 測試（SC-003/008）。
 """
 
 import io
+import json
 from datetime import date
 from pathlib import Path
 
@@ -22,6 +23,10 @@ from data_sources.taifex_source import TaifexAdapter
 from instruments import AssetClass, ContractSpec, Instrument
 
 FIXTURE = Path(__file__).parent / "fixtures" / "taifex_sample_big5.csv"
+# 英文表頭孿生檔：僅表頭換英文，資料列逐字沿用中文 fixture（供「兩表頭同解」斷言）
+FIXTURE_EN = Path(__file__).parent / "fixtures" / "taifex_sample_en_header.csv"
+# 真實 OpenAPI 當日回應樣本（英文鍵、中文時段值），僅留 TX 列
+FIXTURE_OPENAPI_EN = Path(__file__).parent / "fixtures" / "taifex_openapi_en_sample.json"
 
 TXF = Instrument(
     id="TXF", asset_class=AssetClass.FUTURES, source="taifex",
@@ -106,6 +111,65 @@ def test_parse_broken_header_failfast():
     bad = "交易日期,契約,收盤價\n2023/07/03,TX,17035\n".encode("big5")
     with pytest.raises(ValueError):
         ad._parse_csv(bad, commodity="TX")
+
+
+# ---------------------------------------------------------------------------
+# 雙語表頭（TAIFEX OpenAPI 當日端點回英文鍵；CSV 下載端點回中文）
+# ---------------------------------------------------------------------------
+
+def test_parse_english_header_equals_chinese_header():
+    """英文表頭與中文表頭解出完全相同的 DataFrame（欄位與數值皆同）。"""
+    ad, _ = _adapter()
+    zh = ad._parse_csv(FIXTURE.read_bytes(), commodity="TX")
+    en = ad._parse_csv(FIXTURE_EN.read_bytes(), commodity="TX")
+    pd.testing.assert_frame_equal(zh, en)
+    assert not zh.empty                      # 防「兩邊都空也會通過」
+
+
+def test_parse_unknown_header_failfast_reports_both_schemas():
+    """兩套映射皆不匹配才 fail，且錯誤訊息要能分辨是哪一套差什麼。"""
+    ad, _ = _adapter()
+    bad = "Date,Contract,Last\n2023/07/03,TX,17035\n".encode("big5")
+    with pytest.raises(ValueError) as e:
+        ad._parse_csv(bad, commodity="TX")
+    msg = str(e.value)
+    assert "收盤價" in msg                     # 中文套缺的欄位
+    assert "Open" in msg                       # 英文套缺的欄位（兩套都要交代）
+
+
+def test_fetch_latest_parses_english_openapi_payload():
+    """monitor_signals 當日取數路徑：OpenAPI 英文鍵 + 中文時段值 → 正常解析。"""
+    recs = json.loads(FIXTURE_OPENAPI_EN.read_text(encoding="utf-8"))
+    ad, _ = _adapter(responses=[_FakeResp(json_data=recs)])
+    df = ad.fetch_latest(TXF)
+    assert not df.empty
+    assert df["contract"].str.fullmatch(r"\d{6}").all()
+    assert not df.duplicated(subset=["date", "contract"]).any()   # 盤後列已濾除
+    # 錨定：近月 202608 一般時段（盤後列 Last=44715，取到它代表時段過濾失效）
+    r = df[df["contract"] == "202608"].iloc[0]
+    assert (r["open"], r["high"], r["low"], r["close"]) == (44250.0, 44512.0, 42527.0, 42725.0)
+    assert r["settlement"] == 42604.0 and r["open_interest"] == 110864.0
+
+
+def test_fetch_latest_survives_non_big5_characters():
+    """OpenAPI 為 UTF-8；解析不得經 big5 轉碼（非 big5 字元會被吃成 '?' 而汙染資料）。"""
+    recs = json.loads(FIXTURE_OPENAPI_EN.read_text(encoding="utf-8"))
+    recs[0]["TradingHalt"] = "★нет"          # big5 無法表示
+    ad, _ = _adapter(responses=[_FakeResp(json_data=recs)])
+    df = ad.fetch_latest(TXF)
+    assert not df.empty
+
+
+def test_parse_skips_null_marker_rows():
+    """真實資料的第三種缺值標記 'NULL'（見 OpenAPI 盤後列）應視為無成交而略過，不得硬失敗。"""
+    ad, _ = _adapter()
+    text = (
+        "Date,Contract,ContractMonth(Week),Open,High,Low,Last,Volume,"
+        "SettlementPrice,OpenInterest,TradingSession\n"
+        "20260717,TX,202608,44250,44512,42527,42725,103520,NULL,110864,一般\n"
+    )
+    df = ad._parse_csv(text.encode("big5"), commodity="TX")
+    assert df.empty
 
 
 # ---------------------------------------------------------------------------
