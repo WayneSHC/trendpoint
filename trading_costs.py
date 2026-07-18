@@ -14,7 +14,17 @@ TrendPoint - 交易成本與部位 Sizing 元件 (spec 008b)
 契約內生層 = instrument 的 `contract`（ContractSpec）。本模組不得出現費率常數。
 
 術語註記：「契約金額」（期交稅基）與「名目值」（保證金基）為同一量——
-成交價(點) × point_value × 口數。
+價格(點) × point_value × 口數。
+
+價格基準（spec 011）：本模組**對基準無知**——給什麼價就算什麼，簽章不含
+基準概念。選價是呼叫端（BacktestEngine）的責任，語意為：
+- `FuturesSizer.size` / `margin_per_lot` 的 price = 訊號根**未調整**收盤
+- `FuturesCostModel.entry_costs` / `exit_costs` 的 price = 成交根**未調整**價
+  套滑價後之值（稅基）
+- Equity 元件一律維持成交價（現行語意，位元不變）
+理由：back-adjust 連續序列的價位水準不等於當年真實市價（TXF 實測早年偏離
+約 45 倍、最低穿零至 −5,312），凡「價位 × 乘數」型的名目值計算都必須用
+未調整價，否則保證金低估數十倍、負價位甚至算出負稅額。
 """
 
 from __future__ import annotations

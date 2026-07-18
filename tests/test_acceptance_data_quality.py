@@ -104,3 +104,56 @@ def test_jump_threshold_is_load_bearing():
     lax = DataQualityConfig(max_close_jump_ratio=float("inf"))
     # 放寬跳動上限後，唯一攔截 spike 的規則失效——spike 價格為正，故通過驗證
     assert validate_data_contract(outlier, quality=lax) is True
+
+
+# ---------------------------------------------------------------------------
+# spec 011（FR-003）：未調整參考價之正性不受 back-adjust 負價豁免影響
+# ---------------------------------------------------------------------------
+
+def _cont_with_unadj(n: int = 30):
+    """模擬期貨連續序列：調整後價含負值（合法），未調整價恆為正。"""
+    df = make_klines(n, freq="5min")
+    for col in ("open", "high", "low", "close"):
+        df[f"unadj_{col}"] = df[col]
+    shift = float(df["high"].max()) + 50.0
+    for col in ("open", "high", "low", "close"):
+        df[col] = df[col] - shift          # 整體平移至負值域（back-adjust 早年樣態）
+    return df
+
+
+def test_backadjusted_negative_prices_still_pass_with_positive_unadj():
+    """對照組：調整後價為負但未調整價為正 → 放寬模式下應通過。"""
+    df = _cont_with_unadj()
+    assert (df["close"] < 0).all(), "fixture 應產生負的調整後價"
+    assert validate_data_contract(df, quality=_QUALITY,
+                                  allow_nonpositive_prices=True) is True
+
+
+def test_nonpositive_unadjusted_price_rejected_despite_exemption(caplog):
+    """FR-003：unadj_* 出現非正值屬資料異常，即使 allow_nonpositive_prices=True 仍須擋下。
+
+    這道檢查必須置於放寬模式的提早 return 之前——連續層是唯一帶此旗標的
+    呼叫端，也正是唯一需要本檢查的地方。
+    """
+    df = _cont_with_unadj()
+    df.loc[df.index[5], "unadj_close"] = 0.0
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(ValueError, match="unadj_close"):
+            validate_data_contract(df, quality=_QUALITY,
+                                   allow_nonpositive_prices=True)
+
+
+def test_nonfinite_unadjusted_price_rejected():
+    """unadj_* 含 NaN/inf 同樣須擋下（有限性）。"""
+    df = _cont_with_unadj()
+    df.loc[df.index[3], "unadj_open"] = np.inf
+    with pytest.raises(ValueError, match="unadj_open"):
+        validate_data_contract(df, quality=_QUALITY,
+                               allow_nonpositive_prices=True)
+
+
+def test_unadjusted_check_skipped_when_columns_absent():
+    """現貨/既有資料無 unadj_* 欄位時不受影響（FR-008 作用域：不擴及現貨契約）。"""
+    df = make_klines(30, freq="5min")
+    assert "unadj_close" not in df.columns
+    assert validate_data_contract(df, quality=_QUALITY) is True

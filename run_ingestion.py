@@ -18,7 +18,7 @@ from datetime import date, timedelta
 import pandas as pd
 
 from config import load_config
-from instruments import InstrumentRegistry
+from instruments import AssetClass, InstrumentRegistry
 from data_sources import get_adapter
 from data_ingestion import save_to_csv, save_to_sqlite, validate_data_contract
 from db_security import raw_table_name_for, safe_load_db_data, table_name_for, validate_table_name
@@ -127,6 +127,14 @@ def run():
                 continue
 
             print(f"    - 資料筆數: {len(df)}；日期範圍: {df.index.min()} ~ {df.index.max()}")
+
+            # spec 011 FR-009：期貨序列一律攜帶未調整參考價。本路徑的來源
+            # （mock/csv/yfinance）不經連續月拼接、無 back-adjust 平移，故
+            # unadj_* 恆等於原價。此舉使「欄位缺失」唯一代表「本功能實作前
+            # 建立的舊資料」，回測端的硬失敗（FR-008）因而無歧義。
+            if inst.asset_class == AssetClass.FUTURES:
+                for _c in ("open", "high", "low", "close"):
+                    df[f"unadj_{_c}"] = df[_c]
 
             # 資料契約驗證（asset-aware 離群門檻，憲章 VI）
             validate_data_contract(df, quality=sys_cfg.data_quality, asset_class=inst.asset_class)

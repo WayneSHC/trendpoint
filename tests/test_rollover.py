@@ -122,6 +122,58 @@ def test_truncation_invariance_of_front_sequence():
         assert list(sub_front.values) == list(full_front.loc[joint].values)
 
 
+def test_unadjusted_columns_are_raw_front_month_prices():
+    """spec 011 FR-001：連續序列攜帶未調整 OHLC＝當日近月契約原始價（不受平移影響）。"""
+    raw = _raw(_ROWS)
+    front = select_front_month(raw)
+    cont = build_continuous(raw, front, compute_roll_events(raw, front))
+
+    for col in ("unadj_open", "unadj_high", "unadj_low", "unadj_close"):
+        assert col in cont.columns, f"連續序列缺未調整欄位 {col}"
+
+    # 未調整收盤 = 各日近月契約原始收盤（見上方情境註解）
+    assert list(cont["unadj_close"].values) == pytest.approx(
+        [100.0, 102.0, 111.0, 112.0, 113.0, 121.0, 122.0, 123.0])
+    # _raw 構造：open=close−1、high=close+2、low=close−2
+    assert list(cont["unadj_open"].values) == pytest.approx(
+        [c - 1.0 for c in cont["unadj_close"].values])
+    assert list(cont["unadj_high"].values) == pytest.approx(
+        [c + 2.0 for c in cont["unadj_close"].values])
+    assert list(cont["unadj_low"].values) == pytest.approx(
+        [c - 2.0 for c in cont["unadj_close"].values])
+
+    # 調整後 ≠ 未調整（證明平移確實發生、兩組欄位未被混淆）
+    assert cont["close"].iloc[0] != pytest.approx(cont["unadj_close"].iloc[0])
+    # 未調整價恆為正（FR-003 的資料面前提）
+    assert (cont[["unadj_open", "unadj_high", "unadj_low", "unadj_close"]] > 0).all().all()
+
+
+def test_unadjusted_prices_are_truncation_invariant():
+    """spec 011 SC-008 / FR-011：未調整價不含未來資訊——截斷重建後不變。
+
+    對照組：調整後價**允許**改變（平移基準隨尾端而異，rollover 模組 docstring 已載明）。
+    此對照確保本測試具鑑別力，而非恆真。
+    """
+    raw = _raw(_ROWS)
+    full = build_continuous(raw, select_front_month(raw),
+                            compute_roll_events(raw, select_front_month(raw)))
+
+    cut = pd.Timestamp("2023-01-05")          # 截於 d4：第二次轉倉（d6）尚未發生
+    sub = raw[raw["date"] <= cut]
+    sub_front = select_front_month(sub)
+    sub_cont = build_continuous(sub, sub_front, compute_roll_events(sub, sub_front))
+
+    joint = sub_cont.index
+    for col in ("unadj_open", "unadj_high", "unadj_low", "unadj_close"):
+        pd.testing.assert_series_equal(
+            sub_cont[col], full.loc[joint, col], check_exact=True,
+            obj=f"{col} 必須截斷不變（不得含未來轉倉資訊）")
+
+    # 鑑別力對照：調整後收盤在截斷後確實改變（少了 adj2=7 的回溯平移）
+    assert not sub_cont["close"].equals(full.loc[joint, "close"]), \
+        "調整後價未隨截斷改變——測試失去鑑別力，請檢查 fixture 是否涵蓋轉倉事件"
+
+
 def test_expiry_force_roll():
     """近月到期消失（量未先交叉）→ 當日強制換至次一存在契約（資料存在性，非預測）。"""
     rows = [

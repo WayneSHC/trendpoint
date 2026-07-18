@@ -177,3 +177,50 @@ def test_contract_required_for_futures_instrument():
         Instrument(id="BAD", asset_class=AssetClass.FUTURES, source="mock")
     with pytest.raises(ValueError):
         Instrument(id="2330.TW", asset_class=AssetClass.EQUITY, contract=TX)
+
+
+# ---------------------------------------------------------------------------
+# spec 011（SC-006 / FR-005）：期交稅以成交當根未調整價為名目值基準
+#
+# 稅基取的是**成交價**（成交根、含滑價），與 sizing 取的訊號根收盤不同時點，
+# 故不可直接代入未調整收盤價——引擎須對 unadj_open 套同一滑價後傳入。
+# ---------------------------------------------------------------------------
+
+def test_slip_offset_is_basis_independent():
+    """滑價為點數加減（非比例）：對兩組價格套用後，其差恆等於原始價差。
+
+    這是引擎能以「對 unadj_open 套同一 slip」取得未調整成交價的前提。
+    """
+    cm = FuturesCostModel(TX, FuturesCostConfig())
+    adj, unadj = 150.0, 8500.0          # 早年樣態：調整後遠低於真實價
+    for side in ("buy", "sell"):
+        assert (cm.slip(adj, side) - cm.slip(unadj, side)) == pytest.approx(adj - unadj)
+
+
+def test_tax_on_unadjusted_basis_is_positive_and_hand_checkable():
+    """以未調整成交價計稅：金額為正且等於 價 × 乘數 × 口數 × 稅率。"""
+    cfg = FuturesCostConfig()
+    cm = FuturesCostModel(TX, cfg)
+    unadj_exec = cm.slip(8439.0, "buy")          # 1999-06-21 實測未調整收盤水準
+    units = 5.0
+    costs = cm.entry_costs(unadj_exec, units)
+    assert costs.tax == pytest.approx(unadj_exec * TX.point_value * units * cfg.tax_rate)
+    assert costs.tax > 0.0
+    # 定額手續費不隨價格基準改變（FR-005：僅稅基改動）
+    assert costs.commission == pytest.approx(
+        (TX.exchange_fee_per_lot + cfg.broker_commission_per_lot) * units)
+
+
+def test_tax_on_backadjusted_basis_would_be_wrong():
+    """鑑別力對照：以調整後價（早年可為負）計稅會得到荒謬結果。
+
+    這正是本案要修的缺陷——負價位算出負稅額，方向性錯誤。
+    """
+    cfg = FuturesCostConfig()
+    cm = FuturesCostModel(TX, cfg)
+    negative_adj = -5312.0                        # TXF 實測最低調整後收盤
+    wrong = cm.entry_costs(negative_adj, 5.0)
+    assert wrong.tax < 0.0, "負調整價應算出負稅額——若否，本對照失去意義"
+
+    right = cm.entry_costs(cm.slip(8439.0, "buy"), 5.0)
+    assert right.tax > 0.0

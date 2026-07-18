@@ -58,3 +58,37 @@ def test_futures_rollover_gap_present():
     df = get_adapter("mock").fetch(inst, "daily")
     max_jump = df["close"].pct_change().abs().max()
     assert max_jump > 0.03, "mock 應含一段明顯跳空（rollover 怪癖）"
+
+
+# ---------------------------------------------------------------------------
+# spec 011（FR-009 / SC-005）：非 rollover 期貨來源的等價退化
+#
+# mock 來源不經連續月拼接（無 back-adjust），其 unadj_* 恆等於原價。
+# 本測試鎖住「ingestion 通用路徑必須補齊欄位」——否則回測端的硬失敗
+# （FR-008）會誤傷 MTX 這類 mock 期貨標的。
+# ---------------------------------------------------------------------------
+
+def test_mock_futures_gets_unadjusted_columns_and_is_equivalent(tmp_path):
+    inst = Instrument(id="MTX", asset_class=AssetClass.FUTURES, source="mock",
+                      display_name="小型臺指近月（mock）", contract=_C)
+    df = get_adapter(inst.source).fetch(inst, "daily")
+
+    # 模擬 run_ingestion 通用路徑對 futures 的欄位補齊
+    for c in ("open", "high", "low", "close"):
+        df[f"unadj_{c}"] = df[c]
+
+    quality = DataQualityConfig()
+    assert validate_data_contract(df, asset_class=inst.asset_class, quality=quality) is True
+
+    # 存 → 載（SELECT *）後欄位仍在
+    db = str(tmp_path / "t.db")
+    safe_save_to_sqlite(df, table_name_for(inst, "daily"), db)
+    loaded = safe_load_db_data(db, table_name_for(inst, "daily"))
+    for c in ("unadj_open", "unadj_high", "unadj_low", "unadj_close"):
+        assert c in loaded.columns
+
+    # 等價退化：兩組價格逐位元相同 → 回測行為與無此機制時一致
+    for c in ("open", "high", "low", "close"):
+        pd.testing.assert_series_equal(
+            loaded[c], loaded[f"unadj_{c}"], check_names=False, check_exact=True,
+            obj=f"mock 來源之 {c} 與 unadj_{c} 必須相等（無 back-adjust）")

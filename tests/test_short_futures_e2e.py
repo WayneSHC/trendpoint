@@ -24,6 +24,8 @@ TXC = ContractSpec(point_value=200.0, tick_size=1.0, exchange_fee_per_lot=20.0)
 
 
 def _run_short(df, cfg=None, init_capital=10_000_000.0):
+    from acceptance_fixtures import with_unadj
+    df = with_unadj(df)          # spec 011：期貨路徑需未調整參考價欄位
     cfg = cfg or FuturesCostConfig()
     eng = BacktestEngine(initial_capital=init_capital)
     return eng.run_backtest(

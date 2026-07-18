@@ -152,6 +152,35 @@ class BacktestEngine:
         is_futures = (getattr(asset_class, "value", asset_class) == "futures")
         blown_up = False
 
+        # spec 011 FR-008：期貨 sizing／稅以未調整參考價為名目值基準，缺欄即硬失敗。
+        # 失敗要早——擋在指標計算與逐根迴圈之前，不留半份結果。
+        # **不得**加入 fallback 分支：所有期貨來源皆有產出義務（FR-009），故缺欄
+        # 唯一代表「本功能實作前建立的舊資料」；若沉默退回調整後價，保證金低估
+        # 的 bug 會無聲重現，而其症狀（爆倉）極易被誤判為策略問題。
+        if is_futures:
+            _needed = ("unadj_open", "unadj_high", "unadj_low", "unadj_close")
+            _missing = [c for c in _needed if c not in df.columns]
+            if _missing:
+                raise ValueError(
+                    f"期貨回測資料缺少未調整參考價欄位 {_missing}（需 {list(_needed)}）。"
+                    "back-adjust 連續序列的價位水準不等於當年真實市價，不可用於"
+                    "口數/保證金/期交稅的名目值計算。請執行 python run_ingestion.py "
+                    "重建連續層以補齊欄位（spec 011 FR-008）。"
+                )
+
+        def cost_basis_price(bar_row, side, exec_price, *, field='open'):
+            """摩擦成本（期交稅）的價格基準（spec 011 FR-005）。
+
+            期貨：取同根**未調整**價再套同一滑價——稅基是成交契約金額，須反映
+            當年真實市價；back-adjust 後的水位會使稅額失真（早年負價位甚至算出
+            負稅額）。滑價為點數加減，故兩基準的偏移量一致、自洽。
+            現貨：維持成交價（008b 位元不變承諾）。
+            每口定額手續費不吃價格，不受本函式影響。
+            """
+            if not is_futures:
+                return exec_price
+            return cost_model.slip(float(bar_row[f'unadj_{field}']), side)
+
         if verbose:
             print("開始進行策略回測...")
 
@@ -283,8 +312,9 @@ class BacktestEngine:
 
                     # sizing 價格語意按資產類別（008b analyze M1）：
                     # equity = 成交價（現行語意：以成交價算最大可負擔股數）；
-                    # futures = 訊號根收盤價（FR-004 保證金以訊號根名目值計，憲章 I）
-                    sizing_price = float(sig_row['close']) if is_futures else execution_price
+                    # futures = 訊號根**未調整**收盤價（spec 011 FR-004：名目值＝價位×乘數，
+                    # 須用當年真實市價；back-adjust 後的水位會使保證金低估數十倍）
+                    sizing_price = float(sig_row['unadj_close']) if is_futures else execution_price
                     position_shares = sizer.size(capital, sizing_price)
 
                     if position_shares <= 0.0:
@@ -299,7 +329,8 @@ class BacktestEngine:
                         continue
 
                     cost = position_shares * execution_price
-                    entry_costs = cost_model.entry_costs(execution_price, position_shares)
+                    entry_costs = cost_model.entry_costs(
+                        cost_basis_price(row, "buy", execution_price), position_shares)
                     fee = entry_costs.commission
                     if is_futures:
                         # 期貨：不付名目、僅扣摩擦成本（保證金為佔用而非支出）
@@ -330,7 +361,10 @@ class BacktestEngine:
                         # 期貨紀錄擴充（FR-006/data-model）：point_value 供績效配對換算 NT$；
                         # margin_used 為佔用保證金（sizing 約束之稽核欄位）
                         entry_log["point_value"] = point_value
+                        # spec 011：sizing_price 語意為**未調整**訊號根收盤；
+                        # 併記調整後值供驗收比對兩基準之落差
                         entry_log["sizing_price"] = sizing_price
+                        entry_log["sizing_price_adj"] = float(sig_row['close'])
                         margin_fn = getattr(sizer, "margin_per_lot", None)
                         entry_log["margin_used"] = (
                             margin_fn(sizing_price) * position_shares if margin_fn else 0.0
@@ -342,7 +376,8 @@ class BacktestEngine:
                     # 僅期貨可達（成本/口數 = 008b 元件，天然對稱、無借券概念）
                     raw_price = row['open']
                     execution_price = cost_model.slip(raw_price, "sell")
-                    sizing_price = float(sig_row['close'])   # FR-007：sizing 用訊號根收盤
+                    # FR-007 + spec 011 FR-004：sizing 用訊號根**未調整**收盤（多空對稱）
+                    sizing_price = float(sig_row['unadj_close'])
                     position_shares = sizer.size(capital, sizing_price)
 
                     if position_shares <= 0.0:
@@ -355,7 +390,8 @@ class BacktestEngine:
                         })
                         continue
 
-                    entry_costs = cost_model.entry_costs(execution_price, position_shares)
+                    entry_costs = cost_model.entry_costs(
+                        cost_basis_price(row, "sell", execution_price), position_shares)
                     capital -= entry_costs.total   # 期貨：僅扣摩擦成本、不付名目
 
                     pm.is_active = True
@@ -376,7 +412,8 @@ class BacktestEngine:
                         "cash": capital,
                         "event": short_reason,
                         "point_value": point_value,
-                        "sizing_price": sizing_price,
+                        "sizing_price": sizing_price,          # spec 011：未調整基準
+                        "sizing_price_adj": float(sig_row['close']),
                     }
                     margin_fn = getattr(sizer, "margin_per_lot", None)
                     short_log["margin_used"] = (
@@ -416,7 +453,9 @@ class BacktestEngine:
                     if shares_to_sell > 0.0:
                         revenue = shares_to_sell * execution_price
 
-                        exit_costs = cost_model.exit_costs(execution_price, shares_to_sell)
+                        exit_costs = cost_model.exit_costs(
+                            cost_basis_price(row, "buy" if is_short_pos else "sell",
+                                             execution_price), shares_to_sell)
                         commission = exit_costs.commission
                         tax = exit_costs.tax
 
@@ -452,7 +491,9 @@ class BacktestEngine:
                     shares_sold = position_shares
                     revenue = shares_sold * execution_price
 
-                    exit_costs = cost_model.exit_costs(execution_price, shares_sold)
+                    exit_costs = cost_model.exit_costs(
+                        cost_basis_price(row, "buy" if is_short_pos else "sell",
+                                         execution_price), shares_sold)
                     commission = exit_costs.commission
                     tax = exit_costs.tax
 
@@ -499,7 +540,10 @@ class BacktestEngine:
                 if current_equity <= 0.0:
                     if position_shares > 0.0:
                         forced_price = row['close']
-                        forced_costs = cost_model.exit_costs(forced_price, position_shares)
+                        forced_costs = cost_model.exit_costs(
+                            cost_basis_price(row, "buy" if pm.direction == -1 else "sell",
+                                             forced_price, field='close'),
+                            position_shares)
                         if pm.direction == -1:
                             realized = position_shares * (pm.entry_price - forced_price) * point_value
                             forced_action = "COVER_ALL"
