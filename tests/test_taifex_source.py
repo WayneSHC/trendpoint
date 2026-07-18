@@ -160,6 +160,47 @@ def test_fetch_latest_survives_non_big5_characters():
     assert not df.empty
 
 
+def test_parse_failfast_when_every_row_rejected_by_session():
+    """時段值若被 TAIFEX 英譯，過濾會濾光全部列——必須拋錯，不得靜默回空。
+
+    靜默回空會讓 monitor_signals 的 `not latest_raw.empty` 直接跳過、一句話不印，
+    繼續拿庫內舊資料判訊號（比本次大聲壞掉更難察覺）。
+    """
+    ad, _ = _adapter()
+    text = (
+        "Date,Contract,ContractMonth(Week),Open,High,Low,Last,Volume,"
+        "SettlementPrice,OpenInterest,TradingSession\n"
+        "20260717,TX,202608,44250,44512,42527,42725,103520,42604,110864,Regular\n"
+        "20260717,TX,202608,45450,45450,44464,44715,57782,NULL,-,After-Hours\n"
+    )
+    with pytest.raises(ValueError) as e:
+        ad._parse_csv(text, commodity="TX")
+    assert "時段" in str(e.value)
+    assert "Regular" in str(e.value)          # 要印出實際看到的值才好診斷
+
+
+def test_parse_no_session_column_is_not_a_session_failure():
+    """2017-05 前的檔案沒有交易時段欄——視為一般，不得誤觸防呆。"""
+    ad, _ = _adapter()
+    text = ("交易日期,契約,到期月份(週別),開盤價,最高價,最低價,收盤價,成交量,"
+            "結算價,未沖銷契約數\n"
+            "2015/03/02,TX,201503,9500,9600,9450,9550,80000,9550,70000\n")
+    df = ad._parse_csv(text, commodity="TX")
+    assert len(df) == 1 and df.iloc[0]["close"] == 9550.0
+
+
+def test_parse_empty_result_without_matching_commodity_does_not_raise():
+    """完全沒有該商品的列（休市/空回應）→ 回空，不是時段問題，不得誤報。"""
+    ad, _ = _adapter()
+    text = (
+        "Date,Contract,ContractMonth(Week),Open,High,Low,Last,Volume,"
+        "SettlementPrice,OpenInterest,TradingSession\n"
+        "20260717,MTX,202608,44250,44512,42527,42725,103520,42604,110864,一般\n"
+    )
+    df = ad._parse_csv(text, commodity="TX")
+    assert df.empty
+
+
 def test_parse_skips_null_marker_rows():
     """真實資料的第三種缺值標記 'NULL'（見 OpenAPI 盤後列）應視為無成交而略過，不得硬失敗。"""
     ad, _ = _adapter()

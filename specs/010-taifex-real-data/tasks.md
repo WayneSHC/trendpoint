@@ -189,6 +189,12 @@ V4 驗證器注入分歧、V5 負價契約）。
   `fetch_latest` 改直接傳 `str` 給 parser，**移除 big5 轉碼往返**
   （原本會把非 big5 字元吃成 `?` 而汙染資料）。
 - 缺值標記集合加入 `NULL`（原本會使該列硬失敗）。
+- **時段防呆**：有配到該商品的列、卻全數被交易時段檢查濾除 → fail-fast。
+  本次缺陷是「大聲」壞掉（parser 拋錯、監控印訊息降級）；但若 TAIFEX 日後比照
+  表頭把 `一般`/`盤後` 也英譯，過濾會濾光全部列而**靜默回空**，
+  `monitor_signals.py` 的 `not latest_raw.empty` 便無聲跳過、繼續拿庫內舊資料
+  判訊號——比大聲壞掉更難察覺，故補此檢查。判準為純結構性（不猜任何英文字串），
+  休市/無此商品為 0 候選列，不觸發。
 
 **測試（先紅後綠，5 個新測試）**：`tests/fixtures/taifex_sample_en_header.csv`
 （中文 fixture 的英文表頭孿生檔，資料列逐字沿用）斷言兩表頭解出的 DataFrame
@@ -196,7 +202,7 @@ V4 驗證器注入分歧、V5 負價契約）。
 僅留 TX 列）驗證 `fetch_latest` 全程；另含未知表頭 fail-fast、非 big5 字元、
 `NULL` 略過。
 
-**驗收**：`pytest -q` **186 passed, 1 skipped, 1 deselected** 全綠；
+**驗收**：`pytest -q` **189 passed, 1 skipped, 1 deselected** 全綠；
 `pytest -m network -q` **1 passed**（涵蓋 `fetch_raw` + `fetch_latest` 真實端點）；
 `monitor_signals.py --once` 不再出現「TAIFEX CSV 格式異常」。
 以監控同一路徑（`get_adapter("taifex").fetch_latest`）實測：回 6 筆月契約、

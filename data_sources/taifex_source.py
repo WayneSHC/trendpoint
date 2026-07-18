@@ -136,6 +136,8 @@ class TaifexAdapter(DataSourceAdapter):
         schema = self._select_schema(header)
 
         rows = []
+        commodity_rows = 0            # 配到該商品的列數（用於時段防呆）
+        session_rejected: list[str] = []
         for rec in reader:
             # 尾隨逗號使 DictReader 產生 None 鍵（值為 list）——一律略過
             rec = {k.strip(): (v or "").strip()
@@ -143,9 +145,11 @@ class TaifexAdapter(DataSourceAdapter):
                    if k is not None and not isinstance(v, list)}
             if rec.get(schema.contract_id) != commodity:
                 continue
+            commodity_rows += 1
             # 時段值兩種表頭皆為中文（實測）；缺欄位者為 2017-05 前檔案，視為一般
             session_val = rec.get(schema.session, "")
             if session_val not in ("", "一般"):        # 盤後列排除（2017-05 起）
+                session_rejected.append(session_val)
                 continue
             contract = rec.get(schema.contract_month, "")
             if not (len(contract) == 6 and contract.isdigit()):   # 週契約排除
@@ -170,6 +174,16 @@ class TaifexAdapter(DataSourceAdapter):
             except (KeyError, ValueError) as e:
                 raise ValueError(f"TAIFEX CSV 列解析失敗：{rec}") from e
             rows.append(row)
+
+        # 防呆：有候選列卻被時段檢查濾光 → TAIFEX 疑似改了時段標示（如比照表頭英譯）。
+        # 靜默回空會讓 monitor_signals 的 `not latest_raw.empty` 無聲跳過、繼續用舊資料
+        # 判訊號，比大聲壞掉更難察覺，故 fail-fast。休市/無此商品為 0 候選，不觸發。
+        if commodity_rows and len(session_rejected) == commodity_rows:
+            raise ValueError(
+                f"TAIFEX {commodity} 全部 {commodity_rows} 列均被交易時段檢查濾除"
+                f"（欄位 {schema.session!r} 實際值：{sorted(set(session_rejected))}；"
+                f"僅接受 '' 或 '一般'）——疑似 TAIFEX 變更時段標示，請更新過濾條件"
+            )
 
         if not rows:
             return pd.DataFrame(columns=["date", "contract", *(
