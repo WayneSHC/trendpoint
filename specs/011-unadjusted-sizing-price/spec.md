@@ -4,7 +4,7 @@
 
 **Created**: 2026-07-18
 
-**Status**: Draft
+**Status**: Implemented（2026-07-18，SC-001~008 全數通過，驗收實錄見 [tasks.md](tasks.md)）
 
 **Input**: User description: "期貨連續序列攜帶未調整參考價，修正保證金 sizing 與期交稅的價格基準。背景：spec 010 T017 全歷史驗收發現，TXF back-adjust 連續序列（fut_TXF_daily，1998 起 6,947 根、335 次轉倉）早年調整後價位遠低於當年真實價位（close 範圍 -5,312 ~ 48,633，2,259 根 ≤ 0）。008b 的期貨保證金 sizing（trading_costs.py FuturesPositionSizer，margin_per_lot = price × point_value × margin_rate）以調整後價格計名目值，保證金被低估數十倍，導致口數暴增（實測 1999-06-21 進場 463 口，sizing_price=98，當年真實 TX 約 7,500），正常波動即觸發爆倉護欄強制結清。PnL 每點增量（Δ）不受 back-adjust 影響，僅 sizing/保證金/期交稅（ad-valorem，以名目值計）的價格基準錯誤。期望：連續表增加未調整參考價欄位（當日近月契約的 raw 收盤價，data_sources/rollover.py build_continuous 建構時可同時輸出）；回測中口數計算、保證金、期交稅改以未調整參考價為基準，訊號運算與 PnL 每點增量沿用調整後序列。約束：遵守憲章——可調參數集中 config/config.yaml + Pydantic schema、看前偏誤防禦（若引入 rolling 結構須 .shift(1)、tests/test_lookahead_bias.py 加防禦測試）、績效數字必含摩擦成本。範圍：TXF 真資料路徑為主，MTX（mock）沿用同機制不需特殊處理；等寬回填既有資料表（連續層可整表重建）。"
 

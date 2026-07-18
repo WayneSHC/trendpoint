@@ -63,8 +63,13 @@ python monitor_signals.py --once   # 單次訊號檢測與推播
   `003`（台指期做空）已併入 main——期貨單標的**多空**回測
   （`enable_short` 預設關、現貨結構硬邊界、鏡像對稱測試）；組合路徑護欄保留（僅現貨）；
   `010`（真實台指期資料源，`specs/010-taifex-real-data`）已併入 main——TXF 接
-  TAIFEX 官方（1998 起全歷史回填/每日增量）、FinMind 交叉驗證、MTX 暫留 mock，
-  已知限制：back-adjust 早年價位使 008b 保證金 sizing 失真（後續案處理）；
+  TAIFEX 官方（1998 起全歷史回填/每日增量）、FinMind 交叉驗證、MTX 暫留 mock；
+  `011`（未調整參考價，`specs/011-unadjusted-sizing-price`）解決 010 的 sizing
+  失真已知限制——**期貨連續表帶兩組價格**：調整後 OHLC 供訊號與每點損益、
+  `unadj_*` 四欄（平移前擷取的原始近月價）供口數/保證金/期交稅等名目值計算。
+  凡「價位 × 乘數」型計算一律用未調整價；**禁止**由「調整後 − 位移量」回推
+  （位移量是未來轉倉的函數且非截斷不變）。期貨資料缺 `unadj_*` 時回測硬失敗
+  不 fallback，故所有期貨來源（含 mock）皆須產出該欄位；
   `004~006` 見各 spec.md 狀態。新功能走 Spec Kit：
   `/speckit-specify` → `/speckit-plan` → `/speckit-tasks` → `/speckit-implement`
 - 理論：`three_bands_theory.md`、`docs/ladder-optimization-research.md`（階梯優化研究，
