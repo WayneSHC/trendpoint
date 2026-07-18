@@ -4,7 +4,7 @@
 
 **Created**: 2026-07-17
 
-**Status**: Draft
+**Status**: Implemented
 
 **Input**: User description: "讓期貨脫離 mock：接入真實台指期（TX）歷史與每日資料，run_ingestion 存真 fut_* 表，回測與監控用真資料；003 推播的『待真源生效』條款兌現。TAIFEX 官方為主源（權威、免費、1998 起）、FinMind 為交叉驗證哨兵；連續月拼接採成交量最大月轉倉 + back-adjust。"
 

@@ -114,12 +114,47 @@ US1（TAIFEX 端到端 + 消費端切換）；US3（FinMind + 交叉驗證）。
 
 ## Phase 6: Polish & Cross-Cutting
 
-- [ ] T017 V6 真實驗收（**需網路，本機一次**）：`pytest -m network -q` 綠；
+- [x] T017 V6 真實驗收（**需網路，本機一次**）：`pytest -m network -q` 綠；
   `run_ingestion.py` 全歷史回填（~340 請求，冪等重跑一次驗證）；`run_backtest.py`
   TXF 真資料跑通；`--verify`（有 token 則跑、無則記 skipped）；結果如實記入本檔完成註記
   （SC-001/008 正式驗收；mock 基準不再適用 TXF 屬預期資料切換）
-- [ ] T018 [P] 更新 `CLAUDE.md`（010 狀態：TXF 真源、rollover 引擎、驗證器）
-- [ ] T019 最終 `pytest -q` 全綠（合併關卡，不含 network）；quickstart V1–V5 確認
+- [x] T018 [P] 更新 `CLAUDE.md`（010 狀態：TXF 真源、rollover 引擎、驗證器）
+- [x] T019 最終 `pytest -q` 全綠（合併關卡，不含 network）；quickstart V1–V5 確認
+
+---
+
+## 完成註記（2026-07-18，T017/T019 驗收實錄）
+
+**T017 V6 網路驗收（全部如實記錄）**：
+
+1. `pytest -m network -q` 綠（1 passed）。過程中抓到**雙語表頭**問題：TAIFEX 同一
+   `futDataDown` 端點隨 session 時而回中文、時而回英文表頭（英文收盤欄叫 `Last`）——
+   parser 已改雙語映射（commit `4479cd5` 前後系列）。
+2. 全歷史回填：`fut_TXF_raw_daily` **34,722 列（1998-07-21 ~ 2026-07-17）**，
+   ~340 請求 × 2s 節流，一次成功。
+3. 回填後連續序列被品質契約誤擋——back-adjust 累積位移使早期價格穿零
+   （close 範圍 -5,312 ~ 48,633，2,259 根 ≤ 0），`pct_change` 相對跳動比失義
+   （出現 inf/負比）。修正：`allow_nonpositive_prices=True`（僅期貨連續層）時跳過
+   相對跳動檢查，值正確性由 raw 層正價檢查 + 雙源交叉驗證把關；先紅後綠
+   （commit `a75cf06`）。修正後連續序列入庫：**`fut_TXF_daily` 6,947 根、
+   轉倉事件 335 次**。
+4. 冪等重跑：偵測既有 raw → 增量（自 max date+1）、raw 維持 34,722 列不變、
+   連續層整表重建成功。
+5. `run_backtest.py` TXF 真資料**跑通**（載入 6,947 根、引擎完整執行、匯出
+   trades/equity CSV）。結果如實記錄：總報酬 -636.06%、觸發爆倉護欄。
+   成因非引擎缺陷——back-adjust 使早年調整後價位遠低於當年真實價
+   （1999-06-21 進場 sizing_price=98，當年真實 TX ~7,500）→ 008b 保證金 sizing
+   以調整後名目價值計算 → 保證金低估數十倍 → 463 口 → 正常波動即爆倉，
+   護欄如設計強制結清並終止。**已知限制**：sizing/期交稅的價格基準應為未調整價
+   （PnL 每點增量不受影響）；屬 010 範圍外，已立後續任務（連續表攜帶未調整參考價欄）。
+   mock 基準（46.74%/4 筆）不再適用屬預期資料切換；現貨 CLI 數字亦因本次 ingestion
+   刷新 10 年滾動窗而移動（資料變動、非程式變更；程式對照以 pytest 固定資料為準）。
+6. `--verify` 無 FINMIND_TOKEN：印「未執行：FINMIND_TOKEN 環境變數未設定」、
+   exit 0（skipped 語意正確）。有 token 的交叉驗證留待使用者提供 token 後執行。
+
+**T019**：`pytest -q` **182 passed, 1 deselected（network）** 全綠；
+quickstart V1–V5 由離線測試覆蓋（V1 解析錨定、V2 rollover 手算錨定、V3 監控紀律、
+V4 驗證器注入分歧、V5 負價契約）。
 
 ---
 
