@@ -62,8 +62,9 @@ python monitor_signals.py --once   # 單次訊號檢測與推播
   `008a`（資料層）+ `008b`（期貨成本/口數，`specs/009-taifex-cost-model`）已併入 main；
   `003`（台指期做空）已併入 main——期貨單標的**多空**回測
   （`enable_short` 預設關、現貨結構硬邊界、鏡像對稱測試）；組合路徑護欄保留（僅現貨）；
-  `010`（真實台指期資料源，`specs/010-taifex-real-data`）已實作於分支——TXF 接
-  TAIFEX 官方（1998 起全歷史回填/每日增量）、FinMind 交叉驗證、MTX 暫留 mock；
+  `010`（真實台指期資料源，`specs/010-taifex-real-data`）已併入 main——TXF 接
+  TAIFEX 官方（1998 起全歷史回填/每日增量）、FinMind 交叉驗證、MTX 暫留 mock，
+  已知限制：back-adjust 早年價位使 008b 保證金 sizing 失真（後續案處理）；
   `004~006` 見各 spec.md 狀態。新功能走 Spec Kit：
   `/speckit-specify` → `/speckit-plan` → `/speckit-tasks` → `/speckit-implement`
 - 理論：`three_bands_theory.md`、`docs/ladder-optimization-research.md`（階梯優化研究，
