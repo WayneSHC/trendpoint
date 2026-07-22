@@ -131,6 +131,12 @@ class AlertManager:
         """
         全域推播接口，根據環境變數配置決定發送管道。
         若未配置則進入 Mock 模式。
+
+        回傳值語意＝「是否**確實送達外部管道**」，而非「是否處理完畢」。
+        Mock 模式什麼都沒送出，故回傳 False——呼叫端（monitor_signals）以此值
+        決定要不要寫入 sent_alerts 去重表，而該表的語意是「已通知使用者」。
+        若 Mock 也回傳 True，未送出的警報會被標記為已送出，等到憑證補齊時
+        該筆訊號再也不會發出：一次沒送成的通知被永久記成送過了。
         """
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
@@ -163,4 +169,7 @@ class AlertManager:
             print("-" * 60)
             print(plain_message)
             print("#" * 60 + "\n")
-            return True
+            # 未送達外部管道 → False（見本方法 docstring 的回傳值語意）。
+            # 代價是 Mock 模式下同一則警報每輪都會重印；那是刻意的：
+            # 沒有人收得到的狀態本來就該一直吵，而不是安靜地假裝送過了。
+            return False
