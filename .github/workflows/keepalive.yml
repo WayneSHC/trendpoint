@@ -40,6 +40,22 @@ jobs:
         with:
           token: ${{ secrets.KEEPALIVE_TOKEN || github.token }}
 
+      - name: 回報推送身分
+        id: identity
+        # 每次執行都印，不等到 45 天後真的推送才知道用的是哪個身分。
+        # 沒有這一步，設完 KEEPALIVE_TOKEN 也無從確認它有沒有生效。
+        env:
+          HAS_PAT: ${{ secrets.KEEPALIVE_TOKEN != '' }}
+        run: |
+          if [ "$HAS_PAT" = "true" ]; then
+            echo "推送身分：KEEPALIVE_TOKEN（PAT）——提交以帳號本人身分進行，等同人為提交。"
+            echo "identity=KEEPALIVE_TOKEN (PAT)" >> "$GITHUB_OUTPUT"
+          else
+            echo "推送身分：GITHUB_TOKEN（預設）"
+            echo "::notice::目前以 GITHUB_TOKEN 推送。官方文件未載明機器人提交是否算儲存庫活動——設定 KEEPALIVE_TOKEN（細粒度 PAT，contents:write）可消除此不確定性。"
+            echo "identity=GITHUB_TOKEN (預設)" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: 檢查所有排程工作流是否仍為啟用狀態
         id: health
         env:
@@ -123,6 +139,7 @@ jobs:
           DAYS: ${{ steps.check.outputs.days }}
           NEEDED: ${{ steps.check.outputs.needed }}
           RECOVERED: ${{ steps.health.outputs.recovered }}
+          IDENTITY: ${{ steps.identity.outputs.identity }}
         run: |
           {
             echo "### 排程保活與健康檢查"
@@ -130,6 +147,5 @@ jobs:
             echo "- 距上次提交：**${DAYS:-未取得}** 天（門檻 ${THRESHOLD_DAYS}）"
             echo "- 本次是否製造活動：**${NEEDED:-未取得}**"
             echo "- 是否偵測到被停用的工作流：**${RECOVERED:-未取得}**"
-            echo ""
-            echo '推送身分：`KEEPALIVE_TOKEN`（若已設定）否則 `GITHUB_TOKEN`。'
+            echo "- 推送身分：**${IDENTITY:-未取得}**"
           } >> "$GITHUB_STEP_SUMMARY"
