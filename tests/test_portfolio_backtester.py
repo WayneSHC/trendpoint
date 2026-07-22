@@ -12,9 +12,9 @@ TrendPoint - 投資組合回測引擎與資金分配單元測試 (pytest)
 """
 
 import pytest
-import os
 import pandas as pd
 import numpy as np
+from config import load_config
 from portfolio_backtester import PortfolioBacktester
 
 def test_portfolio_backtester_initialization():
@@ -120,14 +120,22 @@ def test_all_tickers_missing_raises(monkeypatch):
     with pytest.raises(ValueError, match="無法執行回測"):
         pb.run_portfolio_backtest()
 
-def test_portfolio_backtest_execution():
+def test_portfolio_backtest_execution(tickers_with_data):
     """
     測試 PortfolioBacktester 的聯合成績效回測執行。
+
+    前提：DB 至少有一檔 config 標的的非空日線資料
+    （判準見 conftest.py 的 tickers_with_data，涵蓋測試在
+    tests/test_db_preconditions.py）。
     """
-    db_path = "trendpoint.db"
-    if not os.path.exists(db_path):
-        pytest.skip("資料庫檔案不存在，跳過實際執行測試")
-        
+    cfg = load_config()
+    db_path = cfg.data.database_path
+    if not tickers_with_data(db_path, cfg.data.tickers):
+        pytest.skip(
+            f"{db_path} 中無任何 config 標的之日線資料"
+            f"（需先執行 run_ingestion.py），跳過實際執行測試"
+        )
+
     pb = PortfolioBacktester()
     res = pb.run_portfolio_backtest()
     

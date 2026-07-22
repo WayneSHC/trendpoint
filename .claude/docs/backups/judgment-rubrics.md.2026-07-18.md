@@ -73,7 +73,7 @@
 
 | 產出 | 底線驗法 |
 | :--- | :--- |
-| 程式碼 | `pytest -q` 全綠 + 實跑受影響的入口腳本一次；綠燈含 skip 時用 `-rs` 逐條看跳過理由——該跑卻跳過等於沒驗到（見下方踩坑教訓） |
+| 程式碼 | `pytest -q` 全綠 + 實跑受影響的入口腳本一次 |
 | 訊號/回測邏輯 | 上行 + 前後回測對照（同資料同成本）+ look-ahead 測試涵蓋 |
 | 文件/制度檔 | fresh-context agent read-back：只給文件不給脈絡，要求它複述規則並舉一個執行例；複述錯 = 文件寫得不夠明確 |
 | 對外文案/授權/安全 | 第二意見（獨立 agent 重做判斷）結論一致才放行 |
@@ -82,20 +82,6 @@
 - ✅ 正例：批次把 30 個檔案加上授權標頭 → grep 統計標頭出現次數 = 檔案數，
   再抽 3 檔 read-back 確認位置與格式。
 - ❌ 反例：「diff 看起來每個檔都改到了」→ 視覺掃過不是驗證。
-
-**踩坑教訓**：
-
-- 坑：同一份程式碼，乾淨工作區 `pytest -q` 全綠，跑過 `python monitor_signals.py --once`
-  之後卻變 1 failed（`test_portfolio_backtest_execution`）。
-  為什麼：該測試的前提檢查（guard）只驗「`trendpoint.db` 檔案存在」，而 monitor 初始化
-  去重表時的 `sqlite3.connect` 會順手建出只含 `sent_alerts` 的空 db——guard 的判準弱於
-  被測程式的真實前提（至少一張非空 `stock_*_daily`），於是該跳過的情境變成失敗。
-  下次怎麼做：guard 的判準一律等同被測程式的前提，禁用「檔案存在」這類代理指標；
-  需要真實 DB 的測試直接用 `conftest.py` 的 `tickers_with_data` fixture：
-  `tickers_with_data(db_path, tickers)` 回傳其中「有非空日線表」的標的，空清單就
-  `pytest.skip`（涵蓋測試見 `tests/test_db_preconditions.py`）。改動 guard 後跑三態
-  驗證——無檔／有檔但無資料／有資料——第三態必須確認測試**實際執行**
-  （`pytest -rs` 且該測試不在 skip 清單），否則「永遠跳過」的 guard 一樣是綠的。
 
 ## 6. 誠實條款：這套制度補不了的東西
 
