@@ -13,6 +13,9 @@ monitor_signals 之 TXF 當日補值（spec 010 analyze H1 路徑）迴歸測試
 三種日期關係各鎖一條：== 不得重複、> 正常補、< 不得亂序。
 """
 
+import sqlite3
+from contextlib import closing
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -201,3 +204,78 @@ def test_test_alert_distinguishes_send_failure_from_missing_config(
 
     assert code == 2
     assert "送出失敗" in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------
+# Mock 模式不得污染去重表
+#
+# sent_alerts 的語意是「已通知使用者」。Mock 什麼都沒送出，若仍寫入該表，
+# 未送出的警報就被永久記成送過了——憑證補齊後那筆訊號再也不會發。
+# 這是行為層的鎖：只驗 send_alert 的回傳值不夠，要驗它造成的後果。
+# --------------------------------------------------------------------------
+
+TXF_MOCK = Instrument(
+    id="TXF", asset_class=AssetClass.FUTURES, source="mock",
+    display_name="台指期近月（mock）",
+    contract=ContractSpec(point_value=200.0, tick_size=1.0, exchange_fee_per_lot=20.0),
+)
+
+
+def _bear_bos_frame(n=60):
+    """尾根確定性空頭 BOS：平盤後末根重挫跌破前低（已收盤之過去日期）。"""
+    idx = pd.date_range("2024-01-01", periods=n, freq="D")
+    close = np.full(n, 100.0)
+    close[-1] = 80.0
+    open_ = np.full(n, 100.0)
+    vol = np.full(n, 1000.0)
+    vol[-1] = 9000.0
+    return pd.DataFrame({"open": open_,
+                         "high": np.maximum(open_, close) + 0.5,
+                         "low": np.minimum(open_, close) - 0.5,
+                         "close": close, "volume": vol}, index=idx)
+
+
+class _SignalAdapter:
+    source_key = "mock"
+
+    def fetch(self, instrument, timeframe):
+        return _bear_bos_frame()
+
+
+def _sent_alert_rows(db_path):
+    with closing(sqlite3.connect(db_path)) as conn:
+        return conn.execute("SELECT ticker, alert_type FROM sent_alerts").fetchall()
+
+
+def test_mock_alert_is_not_recorded_and_fires_again(tmp_path, monkeypatch, capsys):
+    """
+    Mock 模式連跑兩輪：兩輪都要發出警報，且去重表始終是空的。
+
+    改動前第二輪會靜默——因為第一輪的 Mock「送出」被記成已發送。今日實測到
+    這個後果：TXF 於 bar 2026-07-21 的警報被 Mock 執行標記，之後再 dispatch
+    就再也不出現，當下無法分辨是「沒有新訊號」還是「憑證仍未生效」。
+    """
+    from alerts import AlertManager
+
+    db = str(tmp_path / "mock_dedup.db")
+    monkeypatch.setattr(monitor_signals, "DB_PATH", db)
+    monitor_signals.init_sent_alerts_db(db)
+    monkeypatch.setattr(monitor_signals, "get_adapter", lambda key: _SignalAdapter())
+
+    for var in ("LINE_CHANNEL_ACCESS_TOKEN", "LINE_TO",
+                "TELEGRAM_TOKEN", "TELEGRAM_CHAT_ID"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.chdir(tmp_path)  # alerts.log 落在暫存目錄
+    mgr = AlertManager(env_filepath=str(tmp_path / "no-such.env"))
+    assert mgr.is_mock, "前提：無憑證時應為 Mock 模式"
+
+    monitor_signals.check_new_signals("TXF", mgr, instrument=TXF_MOCK)
+    first = capsys.readouterr().out
+    monitor_signals.check_new_signals("TXF", mgr, instrument=TXF_MOCK)
+    second = capsys.readouterr().out
+
+    assert "[MOCK 推播警報]" in first, "第一輪應發出警報"
+    assert "[MOCK 推播警報]" in second, \
+        "第二輪仍應發出——沒送達的警報不該被記成送過了"
+    assert _sent_alert_rows(db) == [], \
+        f"Mock 未送達任何管道，不得寫入去重表，實得: {_sent_alert_rows(db)}"
