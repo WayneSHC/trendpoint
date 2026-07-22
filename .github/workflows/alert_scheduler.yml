@@ -6,6 +6,12 @@ on:
     # 收盤與週末不執行，避免無意義的 Actions 配額消耗
     - cron: '*/30 1-5 * * 1-5'
   workflow_dispatch: # 支援手動觸發執行
+    inputs:
+      mode:
+        description: '執行模式：once=單次訊號檢測；test-alert=只送一筆測試訊息驗證推播管道'
+        type: choice
+        options: [once, test-alert]
+        default: once
 
 jobs:
   run-monitor:
@@ -41,5 +47,15 @@ jobs:
           LINE_TO: ${{ secrets.LINE_TO }}
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # 經 env 傳遞而非直接插值進 run:，避免 workflow_dispatch 輸入落入指令字串
+          # （此處雖為 choice 型別、值域受 GitHub 限制，仍照慣例辦理）。
+          # schedule 觸發時 inputs.mode 為空，退回 once。
+          MODE: ${{ inputs.mode || 'once' }}
         run: |
-          python monitor_signals.py --once
+          if [ "$MODE" = "test-alert" ]; then
+            # 只送一筆測試訊息即 return，繞過訊號計算與去重表——
+            # 用途是單獨驗證「GitHub secrets 有沒有設對」，這是本機跑不到的環節
+            python monitor_signals.py --test-alert
+          else
+            python monitor_signals.py --once
+          fi
