@@ -16,10 +16,10 @@ jobs:
 
     steps:
       - name: 檢出專案程式碼
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: 設定 Python ${{ matrix.python-version }} 環境
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
           cache: 'pip'
