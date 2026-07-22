@@ -1,0 +1,135 @@
+name: TrendPoint - 排程保活與健康檢查
+
+# 為什麼需要這個工作流：
+# 公開 repo 若 60 天沒有「儲存庫活動」，GitHub 會自動停用所有 schedule 觸發的
+# 工作流——訊號推播與每日回填會就此安靜停止，只寄一封信通知。
+# 關鍵限制：**只有新的 commit 算活動**；建 tag、開 issue、合併 PR 都不重置計時器。
+#
+# 官方文件未載明「機器人以 GITHUB_TOKEN 推的 commit 算不算活動」。因此本工作流
+# 不假設它有效，而是推完之後查 repo 的 pushed_at 是否確實前進——查不到就讓這個
+# 工作流紅燈，而不是安靜地以為自己防住了。想要完全確定，設一個 KEEPALIVE_TOKEN
+# （細粒度 PAT，contents:write），推送即以你的身分進行，等同人為提交。
+
+on:
+  schedule:
+    # 每週一 03:17 UTC。避開整點（GitHub 排程在整點壅塞、延遲較明顯）。
+    # 週期遠短於 60 天門檻，容得下數次被跳過的排程。
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write   # 推送保活提交
+  actions: write    # 重新啟用被停用的工作流
+
+concurrency:
+  group: trendpoint-keepalive
+  cancel-in-progress: false
+
+env:
+  # 距上次提交超過這個天數才製造活動。留 15 天餘裕給連續被跳過的排程。
+  # 開發活躍期間此工作流每週跑一次但什麼都不做，不會在歷史留下雜訊。
+  THRESHOLD_DAYS: '45'
+  HEARTBEAT_FILE: .github/keepalive-heartbeat
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 檢出專案程式碼
+        uses: actions/checkout@v5
+        with:
+          token: ${{ secrets.KEEPALIVE_TOKEN || github.token }}
+
+      - name: 檢查所有排程工作流是否仍為啟用狀態
+        id: health
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          # 先報告健康狀況：若已經被停用，後面的保活提交也救不回來
+          # （停用會連 workflow_dispatch 一併擋掉），只能靠這裡重新啟用。
+          gh api "repos/$REPO/actions/workflows" \
+            --jq '.workflows[] | "\(.state)\t\(.id)\t\(.name)"' > workflows.tsv
+          cat workflows.tsv
+
+          DISABLED=$(awk -F'\t' '$1 != "active"' workflows.tsv || true)
+          if [ -n "$DISABLED" ]; then
+            echo "::warning::偵測到非 active 的工作流，嘗試重新啟用"
+            echo "$DISABLED" | while IFS=$'\t' read -r state id name; do
+              echo "  重新啟用：$name（原狀態 $state）"
+              gh api --method PUT "repos/$REPO/actions/workflows/$id/enable"
+            done
+            echo "recovered=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "recovered=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 判斷是否需要製造活動
+        id: check
+        run: |
+          LAST=$(git log -1 --format=%ct)
+          DAYS=$(( ( $(date +%s) - LAST ) / 86400 ))
+          echo "距上次提交 ${DAYS} 天（門檻 ${THRESHOLD_DAYS} 天）"
+          echo "days=$DAYS" >> "$GITHUB_OUTPUT"
+          if [ "$DAYS" -ge "$THRESHOLD_DAYS" ]; then
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+            echo "尚在門檻內，本次不製造活動。"
+          fi
+
+      - name: 推送保活提交
+        if: steps.check.outputs.needed == 'true'
+        run: |
+          mkdir -p "$(dirname "$HEARTBEAT_FILE")"
+          {
+            echo "# 排程保活標記（由 .github/workflows/keepalive.yml 自動更新）"
+            echo "# 存在目的：公開 repo 滿 60 天無 commit 會被停用排程工作流。"
+            echo "last_keepalive: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > "$HEARTBEAT_FILE"
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$HEARTBEAT_FILE"
+          git commit -m "chore(ci): 保活提交，避免排程工作流因 60 天無活動被停用"
+          git push
+
+      - name: 驗證推送確實被記為儲存庫活動
+        if: steps.check.outputs.needed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          # 這一步是整個工作流的重點。保活的前提是「機器人提交算活動」，而官方
+          # 文件並未載明。pushed_at 是 GitHub 對「最後一次推送」的權威時間戳，
+          # 它若沒前進，就代表這次保活很可能無效——寧可在這裡紅燈，也不要安靜
+          # 地以為防住了（那正是 judgment-rubrics 第 5 節記的教訓）。
+          PUSHED=$(gh api "repos/$REPO" --jq '.pushed_at')
+          AGE=$(( $(date -u +%s) - $(date -u -d "$PUSHED" +%s) ))
+          echo "pushed_at=$PUSHED（$AGE 秒前）"
+          if [ "$AGE" -gt 600 ]; then
+            echo "::error::保活提交已推送，但 repo 的 pushed_at 未更新（$PUSHED）。"
+            echo "這代表本機制可能無法重置 60 天計時器。"
+            echo "對策：建立細粒度 PAT（contents:write）並存為 KEEPALIVE_TOKEN，"
+            echo "改以你的身分推送，即等同人為提交。"
+            exit 1
+          fi
+          echo "✓ pushed_at 已更新，保活提交已被記為儲存庫活動。"
+
+      - name: 摘要
+        if: always()
+        # 輸出值一律經 env 傳遞，不直接插值進 run: 字串（與 alert_scheduler 同慣例）
+        env:
+          DAYS: ${{ steps.check.outputs.days }}
+          NEEDED: ${{ steps.check.outputs.needed }}
+          RECOVERED: ${{ steps.health.outputs.recovered }}
+        run: |
+          {
+            echo "### 排程保活與健康檢查"
+            echo ""
+            echo "- 距上次提交：**${DAYS:-未取得}** 天（門檻 ${THRESHOLD_DAYS}）"
+            echo "- 本次是否製造活動：**${NEEDED:-未取得}**"
+            echo "- 是否偵測到被停用的工作流：**${RECOVERED:-未取得}**"
+            echo ""
+            echo '推送身分：`KEEPALIVE_TOKEN`（若已設定）否則 `GITHUB_TOKEN`。'
+          } >> "$GITHUB_STEP_SUMMARY"
