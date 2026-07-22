@@ -1,0 +1,98 @@
+name: TrendPoint - 每日資料回填
+
+# 為什麼要獨立於 alert_scheduler.yml：
+# monitor_signals.py 的輪詢路徑明文限制「至多 1 請求/輪詢、不得呼叫重量 fetch()」
+# （見該檔 TXF 取數段的註解）。全歷史回填是 300+ 請求的重量作業，塞進每 30 分鐘
+# 一次的輪詢會違反該限制，故拆成獨立排程：本工作流負責把 trendpoint.db 養好，
+# 監控工作流只讀庫 + 當日端點。兩者共用同一組 trendpoint-db-* 快取鍵。
+
+on:
+  schedule:
+    # 台北 17:00（= 09:00 UTC）週一至五：晚於收盤（13:30）與 TAIFEX 日檔發布，
+    # 早於隔日開盤前的監控排程（01:00 UTC）
+    - cron: '0 9 * * 1-5'
+  workflow_dispatch: # 首次回填與臨時補資料用
+
+# 回填會寫同一份 db 快取，同時只允許一個在跑；不取消進行中的那個，
+# 因為首次回填長達 15~20 分鐘，中途取消只會浪費已對 TAIFEX 發出的請求
+concurrency:
+  group: trendpoint-ingestion
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    # 首次全歷史回填約 341 請求 × 2s 節流 ≈ 15~20 分鐘；留足餘裕但不無上限
+    timeout-minutes: 60
+
+    steps:
+      - name: 檢出專案程式碼
+        uses: actions/checkout@v5
+
+      - name: 設定 Python 環境
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: 安裝相依套件
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # 還原與保存拆開：回填中途失敗時仍要把已入庫的 raw 進度存下來，
+      # 否則下次會從 1998 年重跑一遍，白白再對 TAIFEX 發 300+ 個請求
+      - name: 還原 SQLite 資料庫快取
+        uses: actions/cache/restore@v5
+        with:
+          path: trendpoint.db
+          key: trendpoint-db-${{ github.run_id }}
+          restore-keys: |
+            trendpoint-db-
+
+      - name: 執行資料匯入（raw 表空則全歷史回填，否則增量）
+        run: python run_ingestion.py
+
+      # run_ingestion.py 對每個標的都是 try/except + continue，TAIFEX 整段失敗
+      # 它仍然 exit 0。沒有這一步，工作流會在 TXF 完全沒進來的情況下報 success
+      # ——正是 .claude/docs/judgment-rubrics.md 第 5 節那兩條教訓的形狀。
+      - name: 驗證 TXF 連續表確實存在且有資料
+        run: |
+          python - <<'PY'
+          import sys
+          from config import load_config
+          from db_security import safe_load_db_data, table_name_for
+          from instruments import InstrumentRegistry
+
+          cfg = load_config()
+          registry = InstrumentRegistry.from_config(cfg.data.tickers, cfg.data.instruments)
+          failed = []
+          for inst in registry.all():
+              if inst.source != "taifex":
+                  continue
+              for tf in inst.timeframes:
+                  table = table_name_for(inst, tf)
+                  df = safe_load_db_data(cfg.data.database_path, table)
+                  if df.empty:
+                      failed.append(f"{table}：空或不存在")
+                      continue
+                  missing = [c for c in ("unadj_open", "unadj_high", "unadj_low", "unadj_close")
+                             if c not in df.columns]
+                  if missing:
+                      failed.append(f"{table}：缺未調整參考價欄位 {missing}")
+                      continue
+                  print(f"OK {table}：{len(df)} 根，{df.index.min().date()} ~ {df.index.max().date()}")
+
+          if failed:
+              print("\n匯入未產出可用的期貨連續表：", file=sys.stderr)
+              for f in failed:
+                  print(f"  - {f}", file=sys.stderr)
+              sys.exit(1)
+          PY
+
+      - name: 保存 SQLite 資料庫快取
+        if: always() # 見上方「還原與保存拆開」的理由
+        uses: actions/cache/save@v5
+        with:
+          path: trendpoint.db
+          key: trendpoint-db-${{ github.run_id }}
