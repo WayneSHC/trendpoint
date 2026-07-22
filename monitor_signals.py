@@ -15,6 +15,7 @@ TrendPoint - 實時訊號監控與去重推播程式 (Signal Monitor)
 import os
 import sqlite3
 import argparse
+import sys
 import time
 import datetime
 import pandas as pd
@@ -241,6 +242,37 @@ def check_new_signals(ticker: str, alert_mgr: AlertManager, instrument=None):
             if alert_mgr.send_alert(mock_prefix + msg):
                 mark_alert_as_sent(ticker, latest_time, alert_type)
 
+def report_test_alert_result(alert_mgr, sent: bool) -> int:
+    """
+    回報 --test-alert 的真實結果並決定結束碼。
+
+    此指令的用途是「驗證推播管道是否配置正確」，因此在完全沒配置時**必須失敗**：
+    一個在無配置環境下仍然通過的驗證等於沒有驗證（judgment-rubrics.md 第 5 節）。
+    不能以 send_alert 的回傳值判定成敗——Mock 模式同樣回傳 True（alerts.py），
+    真假成功在回傳值上無法區分，故改看 AlertManager 的管道旗標。
+
+    結束碼：0=已送出、1=管道未配置（Mock）、2=已配置但送出失敗。
+    """
+    if alert_mgr.is_mock:
+        print("\n✗ 推播管道未配置：本次並未送出任何訊息（上方僅為 Mock 輸出）。")
+        print("  下列任一組配置完整即可啟用——")
+        if not alert_mgr.line_enabled:
+            print("    - LINE：LINE_CHANNEL_ACCESS_TOKEN + LINE_TO")
+        if not alert_mgr.tg_enabled:
+            print("    - Telegram：TELEGRAM_TOKEN + TELEGRAM_CHAT_ID")
+        return 1
+
+    channels = "、".join(
+        [n for n, on in (("LINE", alert_mgr.line_enabled),
+                         ("Telegram", alert_mgr.tg_enabled)) if on]
+    )
+    if sent:
+        print(f"\n✓ 測試訊息已送出（管道：{channels}）。請確認實際收到。")
+        return 0
+    print(f"\n✗ 管道已配置（{channels}）但送出失敗，請檢查權杖有效性與網路連線。")
+    return 2
+
+
 def main():
     parser = argparse.ArgumentParser(description="TrendPoint - Live Signal Monitor")
     parser.add_argument("--test-alert", action="store_true", help="發送一筆測試訊息驗證通知管道配置")
@@ -257,9 +289,12 @@ def main():
     # 1. 執行測試發送
     if args.test_alert:
         print("開始執行推播測試...")
-        test_msg = "<b>【TrendPoint 系統測試】</b>\n這是一筆來自系統的測試警報！\n您的通知發送管道已成功配置。"
-        alert_mgr.send_alert(test_msg)
-        return
+        # 訊息本身不再宣稱「已成功配置」——那句話在 Mock 模式下同樣會印出，
+        # 等於未送出卻聲稱成功。改為條件句，成立與否由收件端自證。
+        test_msg = ("<b>【TrendPoint 系統測試】</b>\n這是一筆來自系統的測試警報。\n"
+                    "若您收到這則訊息，表示推播管道運作正常。")
+        sent = alert_mgr.send_alert(test_msg)
+        return report_test_alert_result(alert_mgr, sent)
 
     # 2. 執行單次檢測（spec 003：全 instrument——現貨 + 期貨）
     if args.once:
@@ -283,4 +318,6 @@ def main():
         print("\n監控循環已終止。")
 
 if __name__ == "__main__":
-    main()
+    # main() 於 --test-alert 路徑回傳結束碼；其餘路徑回傳 None（= 結束碼 0）。
+    # 沒有 sys.exit 的話「管道未配置」在 CI 依然是綠的，等於白做。
+    sys.exit(main())
