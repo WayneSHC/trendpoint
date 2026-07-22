@@ -141,3 +141,63 @@ def test_empty_endpoint_response_is_tolerated(monitor_env, captured_frame, monke
 
     assert stub.calls == 1, "當日端點應恰被呼叫一次（1 請求/輪詢）"
     assert len(captured_frame["df"]) == 60
+
+
+# --------------------------------------------------------------------------
+# --test-alert 的結果回報
+#
+# 該指令的用途是「驗證推播管道是否配置正確」，故無配置時必須失敗——一個在
+# 無配置環境下仍然通過的驗證等於沒有驗證。Mock 模式的 send_alert 同樣回傳
+# True（alerts.py），因此真假成功無法由回傳值區分，判定必須看管道旗標。
+# --------------------------------------------------------------------------
+
+_CHANNEL_VARS = ("LINE_CHANNEL_ACCESS_TOKEN", "LINE_TO",
+                 "TELEGRAM_TOKEN", "TELEGRAM_CHAT_ID")
+
+
+def _manager(tmp_path, monkeypatch, **env):
+    """建立 AlertManager，環境變數完全由參數決定（不讀取真實 .env 與外部環境）。"""
+    from alerts import AlertManager
+
+    for var in _CHANNEL_VARS:
+        monkeypatch.delenv(var, raising=False)
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    return AlertManager(env_filepath=str(tmp_path / "no-such.env"))
+
+
+def test_test_alert_fails_when_no_channel_configured(tmp_path, monkeypatch, capsys):
+    """完全未配置 → 結束碼 1，且明列兩組管道各缺什麼。"""
+    mgr = _manager(tmp_path, monkeypatch)
+    assert mgr.is_mock, "前提：無任何憑證時應為 Mock 模式"
+
+    code = monitor_signals.report_test_alert_result(mgr, sent=True)  # Mock 也回 True
+
+    assert code == 1, "未配置卻回報成功，等於這個驗證指令自己在騙人"
+    out = capsys.readouterr().out
+    assert "並未送出" in out
+    assert "LINE_CHANNEL_ACCESS_TOKEN" in out and "TELEGRAM_TOKEN" in out
+
+
+def test_test_alert_succeeds_when_channel_configured(tmp_path, monkeypatch, capsys):
+    """LINE 配置完整且送出成功 → 結束碼 0，並指出實際使用的管道。"""
+    mgr = _manager(tmp_path, monkeypatch,
+                   LINE_CHANNEL_ACCESS_TOKEN="t", LINE_TO="u")
+    assert not mgr.is_mock
+
+    code = monitor_signals.report_test_alert_result(mgr, sent=True)
+
+    assert code == 0
+    assert "LINE" in capsys.readouterr().out
+
+
+def test_test_alert_distinguishes_send_failure_from_missing_config(
+        tmp_path, monkeypatch, capsys):
+    """已配置但送出失敗 → 結束碼 2，與「未配置」的 1 不同碼，便於分辨。"""
+    mgr = _manager(tmp_path, monkeypatch,
+                   TELEGRAM_TOKEN="t", TELEGRAM_CHAT_ID="c")
+
+    code = monitor_signals.report_test_alert_result(mgr, sent=False)
+
+    assert code == 2
+    assert "送出失敗" in capsys.readouterr().out
