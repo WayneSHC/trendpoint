@@ -199,14 +199,14 @@ def check_new_signals(ticker: str, alert_mgr: AlertManager, instrument=None):
     if latest_bar['mss_signal'] == 1:
         alert_type = "BULLISH_MSS"
         if not is_alert_already_sent(ticker, latest_time, alert_type):
-            msg = f"<b>【多頭反轉訊號】</b>\n標的: {ticker}\n時間: {latest_time}\n價格: {latest_bar['close']}\n說明: 偵測到最新 K 線看漲 MSS 結構破壞，大成交量突破前高，趨勢可能反轉向上！\n當前階梯參考價: {latest_bar['ladder']:.2f}"
+            msg = f"<b>【多頭反轉訊號】</b>\n標的: {ticker}\n時間: {latest_time}\n價格: {latest_bar['close']:.2f}\n說明: 偵測到最新 K 線看漲 MSS 結構破壞，大成交量突破前高，趨勢可能反轉向上！\n當前階梯參考價: {latest_bar['ladder']:.2f}"
             if alert_mgr.send_alert(mock_prefix + msg):
                 mark_alert_as_sent(ticker, latest_time, alert_type)
                 
     elif latest_bar['mss_signal'] == -1:
         alert_type = "BEARISH_MSS"
         if not is_alert_already_sent(ticker, latest_time, alert_type):
-            msg = f"<b>【空頭反轉訊號】</b>\n標的: {ticker}\n時間: {latest_time}\n價格: {latest_bar['close']}\n說明: 偵測到最新 K 線看跌 MSS 結構破壞，大成交量跌破前低，趨勢可能反向做空！\n當前階梯參考價: {latest_bar['ladder']:.2f}"
+            msg = f"<b>【空頭反轉訊號】</b>\n標的: {ticker}\n時間: {latest_time}\n價格: {latest_bar['close']:.2f}\n說明: 偵測到最新 K 線看跌 MSS 結構破壞，大成交量跌破前低，趨勢可能反向做空！\n當前階梯參考價: {latest_bar['ladder']:.2f}"
             if alert_mgr.send_alert(mock_prefix + msg):
                 mark_alert_as_sent(ticker, latest_time, alert_type)
 
@@ -214,14 +214,14 @@ def check_new_signals(ticker: str, alert_mgr: AlertManager, instrument=None):
     if latest_bar['bos_signal'] == 1:
         alert_type = "BULLISH_BOS"
         if not is_alert_already_sent(ticker, latest_time, alert_type):
-            msg = f"<b>【多頭趨勢延續】</b>\n標的: {ticker}\n時間: {latest_time}\n價格: {latest_bar['close']}\n說明: 偵測到 BOS 結構連續突破，多頭力道持續加強！\n當前階梯參考價: {latest_bar['ladder']:.2f}"
+            msg = f"<b>【多頭趨勢延續】</b>\n標的: {ticker}\n時間: {latest_time}\n價格: {latest_bar['close']:.2f}\n說明: 偵測到 BOS 結構連續突破，多頭力道持續加強！\n當前階梯參考價: {latest_bar['ladder']:.2f}"
             if alert_mgr.send_alert(mock_prefix + msg):
                 mark_alert_as_sent(ticker, latest_time, alert_type)
                 
     elif latest_bar['bos_signal'] == -1:
         alert_type = "BEARISH_BOS"
         if not is_alert_already_sent(ticker, latest_time, alert_type):
-            msg = f"<b>【空頭趨勢延續】</b>\n標的: {ticker}\n時間: {latest_time}\n價格: {latest_bar['close']}\n說明: 偵測到 BOS 結構連續跌破，空頭趨勢強烈加壓！\n當前階梯參考價: {latest_bar['ladder']:.2f}"
+            msg = f"<b>【空頭趨勢延續】</b>\n標的: {ticker}\n時間: {latest_time}\n價格: {latest_bar['close']:.2f}\n說明: 偵測到 BOS 結構連續跌破，空頭趨勢強烈加壓！\n當前階梯參考價: {latest_bar['ladder']:.2f}"
             if alert_mgr.send_alert(mock_prefix + msg):
                 mark_alert_as_sent(ticker, latest_time, alert_type)
 
@@ -230,7 +230,7 @@ def check_new_signals(ticker: str, alert_mgr: AlertManager, instrument=None):
     if latest_bar['close'] > latest_bar['upper_price'] and prev_bar['close'] <= prev_bar['upper_price']:
         alert_type = "BREAK_UPPER_BAND"
         if not is_alert_already_sent(ticker, latest_time, alert_type):
-            msg = f"<b>【突破上關價】</b>\n標的: {ticker}\n時間: {latest_time}\n價格: {latest_bar['close']}\n說明: 價格收盤強勢站上昨日三關價之上關位 ({latest_bar['upper_price']:.2f})！多頭波段進入強勢區域。"
+            msg = f"<b>【突破上關價】</b>\n標的: {ticker}\n時間: {latest_time}\n價格: {latest_bar['close']:.2f}\n說明: 價格收盤強勢站上昨日三關價之上關位 ({latest_bar['upper_price']:.2f})！多頭波段進入強勢區域。"
             if alert_mgr.send_alert(mock_prefix + msg):
                 mark_alert_as_sent(ticker, latest_time, alert_type)
                 
@@ -238,7 +238,7 @@ def check_new_signals(ticker: str, alert_mgr: AlertManager, instrument=None):
     elif latest_bar['close'] < latest_bar['lower_price'] and prev_bar['close'] >= prev_bar['lower_price']:
         alert_type = "BREAK_LOWER_BAND"
         if not is_alert_already_sent(ticker, latest_time, alert_type):
-            msg = f"<b>【跌破下關價】</b>\n標的: {ticker}\n時間: {latest_time}\n價格: {latest_bar['close']}\n說明: 價格收盤跌破昨日三關價之下關位 ({latest_bar['lower_price']:.2f})！空頭波段進入弱勢區域。"
+            msg = f"<b>【跌破下關價】</b>\n標的: {ticker}\n時間: {latest_time}\n價格: {latest_bar['close']:.2f}\n說明: 價格收盤跌破昨日三關價之下關位 ({latest_bar['lower_price']:.2f})！空頭波段進入弱勢區域。"
             if alert_mgr.send_alert(mock_prefix + msg):
                 mark_alert_as_sent(ticker, latest_time, alert_type)
 
