@@ -628,6 +628,10 @@ PLOT_LAYOUT = dict(
 )
 GRID = dict(gridcolor="rgba(28,39,51,0.08)")
 
+# 時間序列圖的互動設定：搭配 dragmode="pan" 使用。Plotly 預設拖拉是框選縮放，
+# 看盤時想要的是「按住直接推畫面」，故改為平移 + 滾輪縮放；雙擊回到預設視窗。
+PAN_CONFIG = {"scrollZoom": True, "doubleClick": "reset", "displaylogo": False}
+
 # ── 9.1 價格與訊號 ────────────────────────────────────────
 with tab_price:
     if is_portfolio:
@@ -649,10 +653,10 @@ with tab_price:
                     x=df_normalized.index, y=df_normalized[t], name=t,
                     line=dict(color=colors[idx % len(colors)], width=1.8)
                 ))
-            fig_norm.update_layout(height=420, **PLOT_LAYOUT,
+            fig_norm.update_layout(height=420, **PLOT_LAYOUT, dragmode="pan",
                                    xaxis=GRID, yaxis=dict(title="基準價 (%)", **GRID),
                                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
-            st.plotly_chart(fig_norm, width='stretch')
+            st.plotly_chart(fig_norm, width='stretch', config=PAN_CONFIG)
         except Exception as e:
             st.warning(f"無法載入標的對照圖： {e} ")
     else:
@@ -741,7 +745,7 @@ with tab_price:
         # 預設視窗顯示最近一年，保留 10 年可回溯
         default_start = plot_df.index[-1] - pd.Timedelta(days=365)
         fig_price.update_layout(
-            height=640, **PLOT_LAYOUT,
+            height=640, **PLOT_LAYOUT, dragmode="pan",
             xaxis=dict(rangeslider=dict(visible=False), range=[default_start, plot_df.index[-1]], **GRID),
             xaxis2=dict(range=[default_start, plot_df.index[-1]], **GRID),
             yaxis=GRID, yaxis2=dict(title="ADX", **GRID),
@@ -757,7 +761,7 @@ with tab_price:
                 font=dict(color="#1c2733")
             )
         )
-        st.plotly_chart(fig_price, width='stretch')
+        st.plotly_chart(fig_price, width='stretch', config=PAN_CONFIG)
 
 # ── 9.2 績效分析 ─────────────────────────────────────────
 with tab_perf:
