@@ -171,6 +171,16 @@ def check_new_signals(ticker: str, alert_mgr: AlertManager, instrument=None):
         print(f"警告：未能獲取 {ticker} 數據，略過此標的。")
         return
 
+    # 盤中提示註記：低於日線的時框（現行＝現貨 5 分線）**未經回測驗證**——
+    # 回測/消融/UI 入口一律走日線，且本函式的結構參數為硬編碼常數、與 config
+    # 的策略參數不同源。此為刻意設計（盤中即時提示），非缺陷；定位與理由見
+    # CLAUDE.md 監控段與 docs/reviews/2026-07-30-tradingview-mcp-workflow-review.md。
+    # 註記不影響去重（鍵為 ticker/bar_time/alert_type，與訊息內容無關）。
+    intraday_note = ""
+    if bar_interval < pd.Timedelta(days=1):
+        intraday_note = ("\n\n※ 盤中提示，非回測驗證訊號"
+                         "（監控走盤中時框與硬編碼結構參數；回測走日線與 config 參數）。")
+
     # 2. 計算技術指標與多空訊號
     # 正典組裝入口：與回測引擎共用 ladder_system.build_indicator_frame，
     # 消除兩端重複內聯。監控端不需市況濾網，故 include_regime=False。
@@ -200,14 +210,14 @@ def check_new_signals(ticker: str, alert_mgr: AlertManager, instrument=None):
         alert_type = "BULLISH_MSS"
         if not is_alert_already_sent(ticker, latest_time, alert_type):
             msg = f"<b>【多頭反轉訊號】</b>\n標的: {ticker}\n時間: {latest_time}\n價格: {latest_bar['close']:.2f}\n說明: 偵測到最新 K 線看漲 MSS 結構破壞，大成交量突破前高，趨勢可能反轉向上！\n當前階梯參考價: {latest_bar['ladder']:.2f}"
-            if alert_mgr.send_alert(mock_prefix + msg):
+            if alert_mgr.send_alert(mock_prefix + msg + intraday_note):
                 mark_alert_as_sent(ticker, latest_time, alert_type)
                 
     elif latest_bar['mss_signal'] == -1:
         alert_type = "BEARISH_MSS"
         if not is_alert_already_sent(ticker, latest_time, alert_type):
             msg = f"<b>【空頭反轉訊號】</b>\n標的: {ticker}\n時間: {latest_time}\n價格: {latest_bar['close']:.2f}\n說明: 偵測到最新 K 線看跌 MSS 結構破壞，大成交量跌破前低，趨勢可能反向做空！\n當前階梯參考價: {latest_bar['ladder']:.2f}"
-            if alert_mgr.send_alert(mock_prefix + msg):
+            if alert_mgr.send_alert(mock_prefix + msg + intraday_note):
                 mark_alert_as_sent(ticker, latest_time, alert_type)
 
     # 訊號 B：BOS 趨勢延續 (1為多頭強勢突破，-1為空頭強勢突破)
@@ -215,14 +225,14 @@ def check_new_signals(ticker: str, alert_mgr: AlertManager, instrument=None):
         alert_type = "BULLISH_BOS"
         if not is_alert_already_sent(ticker, latest_time, alert_type):
             msg = f"<b>【多頭趨勢延續】</b>\n標的: {ticker}\n時間: {latest_time}\n價格: {latest_bar['close']:.2f}\n說明: 偵測到 BOS 結構連續突破，多頭力道持續加強！\n當前階梯參考價: {latest_bar['ladder']:.2f}"
-            if alert_mgr.send_alert(mock_prefix + msg):
+            if alert_mgr.send_alert(mock_prefix + msg + intraday_note):
                 mark_alert_as_sent(ticker, latest_time, alert_type)
                 
     elif latest_bar['bos_signal'] == -1:
         alert_type = "BEARISH_BOS"
         if not is_alert_already_sent(ticker, latest_time, alert_type):
             msg = f"<b>【空頭趨勢延續】</b>\n標的: {ticker}\n時間: {latest_time}\n價格: {latest_bar['close']:.2f}\n說明: 偵測到 BOS 結構連續跌破，空頭趨勢強烈加壓！\n當前階梯參考價: {latest_bar['ladder']:.2f}"
-            if alert_mgr.send_alert(mock_prefix + msg):
+            if alert_mgr.send_alert(mock_prefix + msg + intraday_note):
                 mark_alert_as_sent(ticker, latest_time, alert_type)
 
     # 訊號 C：三關價邊界突破
@@ -231,7 +241,7 @@ def check_new_signals(ticker: str, alert_mgr: AlertManager, instrument=None):
         alert_type = "BREAK_UPPER_BAND"
         if not is_alert_already_sent(ticker, latest_time, alert_type):
             msg = f"<b>【突破上關價】</b>\n標的: {ticker}\n時間: {latest_time}\n價格: {latest_bar['close']:.2f}\n說明: 價格收盤強勢站上昨日三關價之上關位 ({latest_bar['upper_price']:.2f})！多頭波段進入強勢區域。"
-            if alert_mgr.send_alert(mock_prefix + msg):
+            if alert_mgr.send_alert(mock_prefix + msg + intraday_note):
                 mark_alert_as_sent(ticker, latest_time, alert_type)
                 
     # 最新 K 線收盤價跌破下關價
@@ -239,7 +249,7 @@ def check_new_signals(ticker: str, alert_mgr: AlertManager, instrument=None):
         alert_type = "BREAK_LOWER_BAND"
         if not is_alert_already_sent(ticker, latest_time, alert_type):
             msg = f"<b>【跌破下關價】</b>\n標的: {ticker}\n時間: {latest_time}\n價格: {latest_bar['close']:.2f}\n說明: 價格收盤跌破昨日三關價之下關位 ({latest_bar['lower_price']:.2f})！空頭波段進入弱勢區域。"
-            if alert_mgr.send_alert(mock_prefix + msg):
+            if alert_mgr.send_alert(mock_prefix + msg + intraday_note):
                 mark_alert_as_sent(ticker, latest_time, alert_type)
 
 def report_test_alert_result(alert_mgr, sent: bool) -> int:

@@ -55,7 +55,14 @@ python monitor_signals.py --once   # 單次訊號檢測與推播
   `db_security.table_name_for`（equity→`stock_*`、futures→`fut_*`、raw 層→`fut_*_raw_*`）；
   `verify_futures_data.py` 雙源交叉驗證（哨兵，需 FINMIND_TOKEN 環境變數）；
   TXF 監控取數＝讀庫＋當日端點（**禁**輪詢中呼叫重量 fetch()）；`data/*.csv` 為快取
-- 通知：`monitor_signals.py` + `alerts.py`（LINE Messaging API / Telegram，無憑證時 Mock）
+- 通知：`monitor_signals.py` + `alerts.py`（LINE Messaging API / Telegram，無憑證時 Mock）。
+  **監控與回測刻意不同源，這不是缺陷**：現貨監控走 5 分線（yfinance 現抓 5 天）＋
+  硬編碼結構參數（`structure_period=10`、`use_fvg=True`、`include_regime=False`），
+  回測/消融/UI 一律走日線＋config 參數；期貨兩端同為日線。故監控定位是
+  **盤中提示，非回測驗證過的訊號**（推播訊息已附註記）。
+  「對齊時框」在現行資料源下不可行——yfinance 的 5m 只給 5 天（約 270 根），
+  跑不出統計意義；真要做需先換資料源。詳見
+  `docs/reviews/2026-07-30-tradingview-mcp-workflow-review.md`
 - UI：`app.py`（Streamlit，禁止內嵌演算法邏輯）
 - 規格：`specs/001` 為 as-built 基準；`002`（FVG 確認）已併入 main；
   `007`（MSS fractal 反轉進場）已併入 main（SC-003 未達成如實記錄），短腿由 003 解封；
