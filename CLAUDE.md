@@ -45,7 +45,7 @@ python monitor_signals.py --once   # 單次訊號檢測與推播
 
 - 演算法核心：`ladder_system.py`（階梯系統）、`performance.py`（KPI）
 - 回測：`backtester.py`（單標的，成本/sizing 走可插拔元件）、`trading_costs.py`
-  （CostModel/PositionSizer 元件 + for_asset_class 工廠，spec 008b：現股 ad-valorem/
+  （CostModel/PositionSizer 元件 + for_asset_class 工廠，spec 009（舊稱 008b）：現股 ad-valorem/
   期貨每口定額+保證金槓桿）、`portfolio_backtester.py`（**期貨護欄保留**，僅現貨）、
   `walk_forward.py`、`optimizer.py`、`monte_carlo.py`、`run_*.py` 為各入口
 - 資料：`instruments.py`（Instrument 資產類別抽象 + registry，spec 008a）→
@@ -59,7 +59,8 @@ python monitor_signals.py --once   # 單次訊號檢測與推播
 - UI：`app.py`（Streamlit，禁止內嵌演算法邏輯）
 - 規格：`specs/001` 為 as-built 基準；`002`（FVG 確認）已併入 main；
   `007`（MSS fractal 反轉進場）已併入 main（SC-003 未達成如實記錄），短腿由 003 解封；
-  `008a`（資料層）+ `008b`（期貨成本/口數，`specs/009-taifex-cost-model`）已併入 main；
+  `008`（資料層，舊稱 008a）+ `009`（期貨成本/口數，舊稱 008b，目錄為
+  `specs/009-taifex-cost-model`——**沒有 `specs/008b` 這個目錄**）皆已併入 main；
   `003`（台指期做空）已併入 main——期貨單標的**多空**回測
   （`enable_short` 預設關、現貨結構硬邊界、鏡像對稱測試）；組合路徑護欄保留（僅現貨）；
   `010`（真實台指期資料源，`specs/010-taifex-real-data`）已併入 main——TXF 接

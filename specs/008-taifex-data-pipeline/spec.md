@@ -4,7 +4,8 @@
 
 **Created**: 2026-07-13
 
-**Status**: Draft
+**Status**: Implemented（008a 已併入 main；24/24 任務與 requirements checklist 全數完成。
+本 Status 於 2026-07-31 補正——先前遺留為 Draft，與 tasks.md 及 CLAUDE.md 不一致）
 
 **Input**: User description（摘要）: 現行程式碼無資產類別抽象——`ticker` 是裸字串，隱含「yfinance symbol → `stock_*` 表 → 現貨股票、賣出課稅、long-only」。要支援台指期（TXF/MTX）需在資料來源、表命名、成本、口數、做空五處打破此假設。本規格（008a）**只做資料層**：引入 `Instrument` 資產類別抽象與可插拔資料來源，讓期貨（與未來其他資產）以加法接入、現貨路徑位元不變。作為 008b（成本/口數）與 spec 003（做空）的前置 enabler。
 
