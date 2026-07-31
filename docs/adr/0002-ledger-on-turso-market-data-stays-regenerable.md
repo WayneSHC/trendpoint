@@ -1,4 +1,15 @@
+---
+status: superseded by ADR-0004
+---
+
 # 帳存於託管 Turso；行情資料留在可再生的快取
+
+> **已被 [ADR 0004](0004-ledger-as-repo-text-file.md) 取代**（2026-07-31，同日）。
+> spec 012 的 Phase 0 研究推翻了本 ADR 的技術前提：驅動為 0.1.x 且 DB-API 相容性
+> 未載明；下方「libSQL 是 SQLite 方言故資料層一行不改」的核心論據不成立——
+> 去重路徑從未經過 `db_security`；且 spec 012 已要求的快照本身就是一份耐久的帳。
+> 帳改為 repo 內的 JSONL。**本文保留不刪**：下方對各選項與各家閒置政策的比較仍有
+> 參考價值，且「階段二遷移成本」的論據在階段二仍然成立。
 
 `trendpoint.db` 目前靠 GitHub Actions cache 在 workflow run 之間傳遞
 （`key: trendpoint-db-${{ github.run_id }}` + `restore-keys` 前綴比對）。這個機制有

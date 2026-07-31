@@ -1,20 +1,21 @@
 # Phase 0 Research: 排程與持久化
 
-**Date**: 2026-07-31 | **Spec**: [spec.md](spec.md) | **ADR**: [0002](../../docs/adr/0002-ledger-on-turso-market-data-stays-regenerable.md)
+**Date**: 2026-07-31 | **Spec**: [spec.md](spec.md) | **ADR**: [0004](../../docs/adr/0004-ledger-as-repo-text-file.md)（取代 [0002](../../docs/adr/0002-ledger-on-turso-market-data-stays-regenerable.md)）
 
-本階段的目的是驗證 ADR 0002 的技術前提是否成立。**三項發現改變了設計**，
-其中一項是對 ADR 0002 措辭的修正（結論不變，理由更精確）。
+本階段的目的是驗證 ADR 0002「帳搬託管 libSQL」的技術前提是否成立。
+**結論是不成立**——三項發現合起來推翻了託管資料庫方案，改為 repo 內純文字檔，
+並產出 ADR 0004。這正是 Phase 0 存在的意義：在寫任何程式碼之前推翻自己的設計。
 
 ---
 
-## R1：libSQL Python 驅動的成熟度與 DB-API 相容性
+## R1：不需要資料庫，也不需要資料庫驅動
 
-**Decision**：採用 `libsql` 套件，但**不讓累積紀錄依賴 pandas 的 `to_sql`/`read_sql`**，
-只依賴文件明確記載的 `connect()` / `execute(sql, params)` / `commit()` 三個操作。
+**Decision**：帳為 repo 內按月分割的 JSONL（`ledger/YYYY-MM.jsonl`），
+不引入任何資料庫驅動或外部服務。
 
-**Rationale**：
+**Rationale**：三條證據，任一條單獨都不足以推翻 ADR 0002，合起來足夠。
 
-查證結果：
+### 證據一：驅動不成熟
 
 | 項目 | 事實 |
 |---|---|
@@ -22,60 +23,69 @@
 | 版本／發布日 | **0.1.11，2025-09-02**（距今約 11 個月） |
 | PyPI 說明 | 無（"The author of this package has not provided a project description"） |
 | 官方文件宣稱 | 「Python `sqlite3`-compatible」API |
-| 文件明確記載的操作 | `connect(database=..., auth_token=...)`、`execute()`、`commit()`、`sync()` |
-| 文件**未**記載 | `cursor()`、`executemany()`、完整 DB-API 2.0 相容性、純本機檔連線語法、
-不支援的 sqlite3 功能清單 |
+| 文件明確記載 | `connect(database=..., auth_token=...)`、`execute()`、`commit()`、`sync()` |
+| 文件**未**記載 | `cursor()`、`executemany()`、完整 DB-API 2.0 相容性、純本機檔連線語法、不支援的 sqlite3 功能清單 |
 
-這是一個 **0.1.x、十一個月未發版、無 PyPI 說明、DB-API 相容性未載明**的驅動，
-而我們要用它保管專案唯一不可再生的資產。直接把它當 `sqlite3` 的 drop-in 替換
-（例如丟給 pandas `to_sql`）是把賭注押在未經證實的相容面上。
+一個 0.1.x、十一個月未發版、無說明、DB-API 相容性未載明的驅動，
+要用來保管專案唯一不可再生的資產。
 
-避開的方法是**縮小依賴面**：累積紀錄的存取型態是「每日追加數筆、以主鍵查詢單筆」，
-不是 DataFrame 批次載入。因此只需要 `execute(sql, params)` 與 `commit()`
-——兩者都有文件記載。pandas 完全不進入這條路徑。
+### 證據二：需求量級與方案量級差三個數量級
 
-副效果是驅動可替換性變高：若 `libsql` 日後無人維護，替換面只有一個薄轉接層，
-而不是散落各處的 `to_sql` 呼叫。
+`sent_alerts` 目前**總共 1 列**——`('MTX', '2021-02-24 00:00:00', 'BULLISH_BOS',
+寫於 '2026-07-18')`，還是 MOCK 資料。spec 013 的影子部位加入後為每日數筆、
+年增量以千筆計。相對地，行情庫是 52,972 列。
+
+託管資料庫對本階段的淨貢獻是「SQL 查詢能力」，而**沒有任何東西需要查詢它**。
+儀表板若日後要顯示帳，用 pandas 讀 JSONL 是一行。
+
+### 證據三：原方案已內含一份耐久的帳
+
+ADR 0002 把「快照」列為**必要項而非選項**（因該服務曾於 2023-12-04 發生免費層
+資料洩漏與遺失事故），且 spec 012 原 FR-008 要求快照為「全量匯出、內容有變動即
+commit 進 repo、可獨立還原、逐筆一致」。
+
+那已經是一份 append-only、永久、可 diff、不受 LRU 淘汰的帳。
+託管資料庫因此是**疊在「反正要建的機制」上面的一份工作副本**——
+移除它，剩下的那一層就是完整的解答。這也讓帳與快照收斂為同一個物件，
+spec 因而少掉一個 user story。
 
 **Alternatives considered**：
 
-- **把 `libsql` 當 sqlite3 drop-in、沿用 pandas 路徑**：最少程式碼，但賭在未載明的
-  相容性上；且 pandas 對非 `sqlite3` 連線的處理路徑會因版本而異，屬於難以測出的脆弱點。
-- **走 Turso HTTP API（不用 Python 驅動）**：消除驅動依賴，但要自行處理序列化、
-  重試、型別對應，且失去「SQLite 方言」帶來的階段二遷移優勢。
-- **改用 Postgres 驅動（psycopg）成熟度高**：已於 ADR 0002 否決，理由是會使階段二
-  （行情資料遷移）被定價成資料層重寫而永不發生。
+- **Turso / libSQL（ADR 0002 的選擇）**：見上。其「階段二遷移便宜」的論據仍成立，
+  但那是階段二的事；且屆時的需求（動態表名、DataFrame 存取、儀表板遠端讀取）
+  與今天差異足夠大，今天的選擇大概也會被翻案。
+- **Neon / Postgres**：既然 R2 證明 `db_security` 不在這條路徑上，SQLite 方言的
+  優勢消失，改選成熟驅動（`psycopg`）本來合理。否決理由是它並未解決
+  「為 1 列資料引入外部服務與憑證」這個根本問題。
+- **維持 Actions cache**：即本 spec 要解決的問題本身（LRU 淘汰、7 天過期、
+  branch-scoped、靜默復活舊快照）。
+- **SQLite 檔提交進 repo**：`.gitignore` 已排除 `*.db`，且二進位檔無 diff 價值。
 
 ---
 
-## R2：ADR 0002 的「db_security 一行不改」需要更精確的措辭
+## R2：`db_security` 不在這條路徑上（ADR 0002 核心論據的證偽）
 
-**Decision**：措辭修正為——**累積紀錄的存取路徑本來就不經過 `db_security`，
-因此本 spec 不改動它；`db_security` 的價值在階段二（行情資料遷移）才會被兌現。**
+**Decision**：本 spec 不改動 `db_security`；其價值在階段二才會被兌現。
 
 **Rationale**：
 
-查證 as-built（`monitor_signals.py:37-92`）發現，現行去重紀錄的三個函式
-（`init_sent_alerts_db` / `is_alert_already_sent` / `mark_alert_as_sent`）**直接呼叫
-`sqlite3.connect`，完全沒有經過 `db_security`**。
+ADR 0002 的核心論據是「libSQL 是 SQLite 方言，故 `db_security` 一行不改」。
+但查證 as-built（`monitor_signals.py:37-92`）發現，現行去重紀錄的三個函式
+（`init_sent_alerts_db` / `is_alert_already_sent` / `mark_alert_as_sent`）
+**直接呼叫 `sqlite3.connect`，完全沒有經過 `db_security`**。
 
 原因是合理的：`db_security` 的核心價值是**動態表名白名單**
-（`^(stock|fut)_[a-zA-Z0-9_]+_(daily|5m)$`），用來防止「以標的代號組出表名」時的注入。
-去重紀錄的表名是**固定字面值** `sent_alerts`，沒有動態表名，所以那道防線無事可做；
+（`^(stock|fut)_[a-zA-Z0-9_]+_(daily|5m)$`），防的是「以標的代號組出表名」時的注入。
+去重紀錄的表名是**固定字面值** `sent_alerts`，沒有動態表名，那道防線無事可做；
 它需要的只是參數化查詢，而現行程式碼**已經**是參數化的（`WHERE ticker=? AND ...`）。
 
-所以 ADR 0002 寫的「libSQL 是 SQLite 方言故 `db_security` 一行不改」在本 spec 為真，
-但理由不是「因為方言相容所以能沿用」，而是「這條路徑從來沒用它」。
-**方言相容的真正價值在階段二**——屆時要搬的是動態表名的行情表，那才會需要
-`db_security` 原樣運作。ADR 0002 的結論（選 Turso 以保住階段二可行性）不變。
+因此 ADR 0002 那句話為真，但**理由不是「方言相容所以能沿用」，而是「這條路徑
+從來沒用它」**——這使得該論據無法支撐「必須選 SQLite 方言的供應商」這個結論。
+方言相容的真正價值在階段二（搬動態表名的行情表）。
 
-憲章 Security 節「SQLite 存取一律使用參數化查詢」的要求，本 spec 以「所有語句
-皆為參數化字面值 SQL」滿足，不需引入 `db_security`。
-
-**Alternatives considered**：
-
-- **把去重紀錄也納入 `db_security`**：為固定表名套上動態表名白名單，
-  是把防護當儀式，且會把 `db_security` 與託管驅動耦合、增加階段二的變更面。
+改為純文字檔後，本 spec 連 SQL 都不再涉及，憲章 Security 節
+「SQLite 存取一律使用參數化查詢」對帳的路徑自然不適用
+（該要求對行情路徑仍然完全有效，而行情路徑本 spec 不動）。
 
 ---
 
@@ -99,10 +109,8 @@
 
 同時查到一個相關的 as-built 行為：`is_alert_already_sent` 在任何例外時
 `return False`（視為未發送 → 會重發），`mark_alert_as_sent` 則吞掉寫入例外。
-兩者都是「向重複告警傾斜」的 fail-open 設計，與該憲章條款一致。
-本 spec 的 FR-006（有憑證但不可達須硬失敗）要改的正是這個傾斜——
-做法是**在初始化時就失敗**，使後續流程永遠不會在儲存已壞的情況下走到 fail-open 分支
-（見 R4）。
+兩者都是「向重複告警傾斜」的 fail-open 設計，與該憲章條款一致。本 spec
+保留這個傾斜（見 R4），但把系統性故障從中分離出來。
 
 **Alternatives considered**：
 
@@ -112,65 +120,70 @@
 
 ---
 
-## R4：故障語意——fail-fast 與 fail-open 的分界
+## R4：故障語意——同步失敗紅燈，讀取失敗 fail-open
 
-**Decision**：**連線階段 fail-fast，資料階段沿用 fail-open。**
-分界點是「憑證是否存在」與「連線是否建立成功」，在任何訊號判定發生**之前**決定。
+**Decision**：**同步階段（寫檔後的 rebase／commit／push）失敗即紅燈；
+帳的讀取失敗沿用既有 fail-open。** 同步模式（`ci` / `local`）於啟動時判定一次。
 
 **Rationale**：
 
-FR-005（無憑證退化本機）與 FR-006（有憑證但不可達硬失敗）看似衝突，實則是
-兩個不同時機的決策。設計為單一啟動期判定：
+ADR 0002 時期的設計是「憑證存在但連線失敗 → fail-fast」。改為純文字檔後
+憑證消失，該分界不再適用。新的分界如下：
 
-| 憑證 | 連線 | 行為 |
-|---|---|---|
-| 未設定 | — | 用本機檔，輸出明示「目前使用本機儲存」，**不視為錯誤**（FR-005） |
-| 已設定 | 成功 | 用託管儲存 |
-| 已設定 | 失敗 | **立即以非零碼結束**，訊息明指持久化失敗；**不退化本機**（FR-006、FR-007） |
+| 情境 | 行為 |
+|---|---|
+| 本機執行 | 只寫工作目錄的檔案，不 commit／push；輸出明示「本機模式，紀錄未推送」；**不視為錯誤** |
+| CI、無新紀錄 | 不產生提交；**不視為錯誤**（FR-009） |
+| CI、推送成功 | 正常 |
+| CI、衝突 | `pull --rebase` 後重試（上限可組態） |
+| CI、重試耗盡 | **非零碼結束**，訊息明指帳未落地；MUST NOT 靜默丟棄（FR-010） |
+| 讀取帳失敗 | 沿用 fail-open（視為未發送 → 會重發）。憲章「不得漏發」 |
 
-如此一來，程式進入訊號判定時，儲存必定可用。既有的 fail-open 例外處理
-（查詢失敗視為未發送）得以保留為最後一道防線而非常態路徑——它防的是執行期
-偶發錯誤，不再是「整個儲存機制壞掉」這種系統性故障。
+保留讀取端 fail-open 的理由：單一標的的暫時性錯誤不應擴散為全部標的漏發。
+而寫入端之所以能夠 fail-fast，是因為同步發生在**所有紀錄寫入完成之後**、
+一次性進行——它要嘛整批成功、要嘛整批失敗，不存在「部分標的受影響」的中間態。
+
+**這個不對稱是本設計最不直觀之處**：同一種「帳出問題」，讀取要容忍、同步要紅燈。
+正當性在於同步階段能明確區分系統性故障，讀取階段不能。已寫入契約
+[C4](contracts/append-only-store-contract.md)，並註明勿「順手統一」。
 
 **Alternatives considered**：
 
-- **全程 fail-fast（含資料階段）**：任何查詢失敗即中止整輪推播。會讓單一標的的
-  暫時性錯誤擴散為全部標的漏發，違反憲章「不得漏發」。
-- **全程 fail-open**：即現狀，FR-006 無從成立。
+- **同步也 fail-open（失敗就算了）**：帳會靜默出洞，正是本 spec 要消除的失敗模式，
+  且與 `daily_ingestion` 額外加驗證步驟所防的假綠燈同形。
+- **讀取也 fail-fast**：任何讀取錯誤即中止整輪推播，會使暫時性錯誤造成全面漏發，
+  違反憲章「不得漏發」。
 
 ---
 
-## R5：快照的形式與落點
+## R5：併發與衝突
 
-**Decision**：快照為**單一檔案的完整匯出**（累積紀錄的所有列），
-於該次所有寫入完成後產生；內容有變動才提交進 repo，並每次執行另存一份可下載副本。
+**Decision**：`pull --rebase` + 重試（上限可組態，預設 3 次），不引入鎖。
+帳按 UTC 月分割以收斂衝突面。
 
 **Rationale**：
 
-- **形式**：累積紀錄年增量以千筆計，全量匯出成本可忽略，且全量快照的還原邏輯
-  比增量快照簡單得多（US3 情境 1 要求「逐筆一致」，全量匯出可直接比對）。
-- **落點**：提交進 repo 取得永久保存與 `git log -p` 可追溯性；可下載副本
-  （Actions artifact）保留期有限，作為近期的快速取用。兩者互補而非重複。
-- **變動才提交**（FR-009）：避免每個交易日一筆 bot commit 的歷史雜訊。
-- **時序**（FR-008）：必須在寫入之後——若快照先於寫入，還原會遺失該次紀錄
-  （spec Edge Cases 已列）。
+- **衝突頻率極低**：`alert_scheduler` 排程於 01:00–05:30 UTC、`daily_ingestion` 於
+  09:00 UTC，兩者不重疊。衝突只來自手動 `workflow_dispatch` 造成的同時執行。
+- **JSONL 的追加式衝突易解**：兩邊都在檔尾追加，rebase 後重新追加即可
+  （新紀錄在記憶體中，重放成本為零）。
+- **月分割**的作用是避免單檔無限增長，同時讓衝突面只涉及當月數十至數百列。
+- **不引入鎖**：以此寫入頻率（每日數筆）引入分散式鎖，是為極罕見事件付出
+  常態複雜度，且違反憲章 Governance「複雜度必須被證成」。
 
-**已知副作用**：這類提交會重置 GitHub 的 60 天儲存庫活動計時器，
-使 `keepalive` 的**保活**職責變為冗餘。但該工作流的另兩項職責——
-偵測並重新啟用被停用的工作流、以及回報推送身分——仍有價值，故不移除。
-`keepalive.yml` 現行的 `THRESHOLD_DAYS: 45` 會使它在有快照提交的期間什麼都不做，
-行為正確、無須改動。
+**已知風險**：CI 的 `actions/checkout` 若為 shallow clone，rebase 可能失敗
+——帳同步所需的 git 歷史深度必須在實作時明確（spec Edge Cases 已列）。
 
 **Alternatives considered**：
 
-- **只存 artifact**：保留期與「累積多年紀錄」的目的衝突（ADR 0002 已否決同一論點）。
-- **只提交 repo**：失去「隨時可下載最近一份」的便利，且沒有第二個副本。
-- **每次執行都提交**：每年約 250 筆 bot commit 的雜訊。
+- **一檔一次執行**（`ledger/<timestamp>.jsonl`）：完全不會衝突，但每年產生
+  2,500+ 個小檔，目錄不可讀。
+- **強制 `push --force`**：會覆蓋另一次執行的紀錄，正是 FR-002 禁止的靜默覆蓋。
 
 ---
 
 ## 未解事項
 
-無 `NEEDS CLARIFICATION`。唯一的外部依賴是 repo owner 需自行註冊託管服務帳號
-並設定 `TURSO_DATABASE_URL` / `TURSO_AUTH_TOKEN`（spec Assumptions 已載明）；
-US2 的本機退化路徑使開發與單元測試不受此阻塞。
+無 `NEEDS CLARIFICATION`。**本 spec 無外部前置條件**——不需註冊任何帳號、
+不需任何 Secrets，US1／US2／US3 皆可在本機與 CI 完整驗收。
+（此為相對 ADR 0002 方案的主要改善之一。）
