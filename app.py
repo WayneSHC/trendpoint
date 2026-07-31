@@ -30,6 +30,7 @@ from instruments import equity_instrument
 from security_utils import is_locked, register_failed_attempt, reset_lockout
 from performance import rolling_sharpe
 from monte_carlo import bootstrap_trades
+import ma_lines                      # spec 014：均線現況（通知層元件，不進訊號路徑）
 import ladder_system
 from ladder_system import (
     detect_market_structure, calculate_ladder_levels,
@@ -660,6 +661,38 @@ with tab_price:
         except Exception as e:
             st.warning(f"無法載入標的對照圖： {e} ")
     else:
+        # ── 均線現況（spec 014 US4／FR-013）─────────────────────────
+        # 推播採「向下穿越」事件語意，故已經在均線下方的標的不會觸發任何通知；
+        # 「沒收到通知」若被誤讀為「在均線之上」就會出錯。本表即為該盲點的補集：
+        # **推播回答「剛剛發生什麼」，本表回答「現在是什麼狀態」**。
+        # 只讀不發——本區塊不觸發任何推播（FR-014）。
+        with st.expander("均線現況（月／季／半年／年線）", expanded=False):
+            try:
+                _ma_rows = ma_lines.build_status_rows(
+                    df_kline['close'],
+                    cfg.alerts.all_periods(),
+                    current_price=float(df_kline['close'].iloc[-1]),
+                )
+                # 資料不足之線一律顯示「資料不足」，不得顯示空白或 0——
+                # 後者會與「價格恰在均線上」混淆（FR-013）。
+                _INSUFFICIENT = "資料不足"
+                st.dataframe(
+                    pd.DataFrame([{
+                        "均線": f"{r['label']} ({r['period']} 日)",
+                        "均線值": _INSUFFICIENT if r['ma'] is None else f"{r['ma']:.2f}",
+                        "目前價": f"{r['price']:.2f}",
+                        "位置": _INSUFFICIENT if r['position'] is None else r['position'],
+                        "乖離": _INSUFFICIENT if r['deviation'] is None else f"{r['deviation']:+.2%}",
+                    } for r in _ma_rows]),
+                    width='stretch', hide_index=True,
+                )
+                st.caption(
+                    "均線由日線收盤價計算（簡單移動平均）。資料不足的線不予計算，"
+                    "亦不會發出通知——避免以不足的資料算出假均線而誤導。"
+                )
+            except Exception as e:
+                st.warning(f"無法計算均線現況： {e} ")
+
         # 完整指標重算（繪圖用）
         plot_df = df_kline.copy()
         plot_df['atr'] = sig_df['atr']

@@ -14,7 +14,7 @@ TrendPoint 把多空階梯系統（Ladder System）、ATR 波動率錨定、台�
 - **投資組合回測**：跨多標的組合層級回測。
 - **參數尋優與 Walk-Forward 驗證**：樣本內尋優 / 樣本外驗證，避免過度擬合。
 - **消融測試（Ablation）**：量化各進場濾網的邊際貢獻。
-- **即時訊號監控與推播**：透過 LINE Messaging API 與 Telegram 推送 BOS / MSS / 三關價突破訊號。
+- **即時訊號監控與推播**：透過 LINE Messaging API 與 Telegram 推送 BOS / MSS / 三關價突破訊號，以及月／季／半年／年線的觸價通知。
 
 ## 環境需求
 
@@ -78,6 +78,32 @@ TELEGRAM_CHAT_ID=你的 chat id
 
 GitHub Actions（[`.github/workflows/alert_scheduler.yml`](.github/workflows/alert_scheduler.yml)）每 30 分鐘自動執行一次監控，憑證以同名 Repository Secrets 提供。
 
+### 均線觸價通知（月／季／半年／年線）
+
+股價**向下穿越**月線／季線／半年線／年線時推播。於 `config/config.yaml` 設定，
+**總開關預設關閉**：
+
+```yaml
+alerts:
+  ma_alerts_enabled: false   # 改為 true 啟用
+  monthly:     { enabled: true, period: 20 }
+  quarterly:   { enabled: true, period: 60 }
+  half_yearly: { enabled: true, period: 120 }
+  yearly:      { enabled: true, period: 240 }
+```
+
+幾點設計說明：
+
+- **觸發語意是「穿越」而非「低於」**：價格持續低於均線的期間不會重複通知
+  （否則每根 K 線都會發一次）。同一標的同一條線**每交易日至多一則**。
+- **想知道「現在的狀態」請看儀表板**：`app.py` 的「均線現況」表列出目前相對
+  四條線的位置與乖離。這是穿越語意的補集——推播回答「剛剛發生什麼」，
+  儀表板回答「現在是什麼狀態」。
+- **均線由日線計算**（年線需 240 根日線，故須先執行 `run_ingestion.py` 累積歷史）；
+  日線根數不足的線**不會通知也不會顯示數值**，而是標示「資料不足」——
+  以 30 根日線算出的「年線」是誤導。
+- 期貨標的不適用（連續序列經 back-adjust，價位水準與當年真實市價脫節）。
+
 ## 測試
 
 ```bash
@@ -99,6 +125,7 @@ monte_carlo.py            蒙地卡羅交易重抽
 performance.py            績效與風險指標
 data_ingestion.py         K 線資料下載與清洗
 monitor_signals.py        即時訊號監控
+ma_lines.py               均線觸價通知的純函式元件
 alerts.py                 LINE / Telegram 推播管理
 config/                   設定（config.yaml）
 specs/                    功能規格（Spec Kit）
@@ -113,8 +140,11 @@ tests/                    pytest 測試套件
   不可協商的工程原則（看前偏誤防禦、真實摩擦成本、驗收標準必須映射至測試等）。
 - **基準規格**：[`specs/001-ladder-core/spec.md`](specs/001-ladder-core/spec.md) —
   現行系統的 as-built 規格。
-- **功能規格**：`specs/002` ~ `specs/006` — 待開發功能
-  （FVG 確認、空頭階梯、驗收測試套件、極端趨勢 k 值、離場體系補完）。
+- **功能規格**：`specs/002` 起的各案；狀態以各 `spec.md` 的 Status 欄為準。
+  已併入 main 的包含 FVG 確認（002）、台指期做空（003）、MSS 反轉進場（007）、
+  資料層與期貨成本（008/009）、TAIFEX 真實資料源（010）、未調整參考價（011）、
+  均線觸價通知（014）；`012`（BOS 量能確認）與 `013`（進場閘門）規格與計畫齊備、
+  尚未實作。
 
 新功能開發流程：`/speckit-specify` →（必要時 `/speckit-clarify`）→ `/speckit-plan` →
 `/speckit-tasks` → `/speckit-implement` → `/speckit-analyze`。

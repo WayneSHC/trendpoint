@@ -288,6 +288,72 @@ class DataQualityConfig(BaseModel):
         """依資產類別取離群門檻；AssetClass(str,Enum) 成員 == 其字串值，dict.get 兩者皆可。"""
         return self.max_close_jump_ratio_by_asset.get(asset_class, self.max_close_jump_ratio)
 
+class MaLineConfig(BaseModel):
+    """
+    單一均線的通知設定（spec 014）。
+    """
+    enabled: bool = Field(
+        default=True,
+        description="是否對此條均線發送觸價通知（總開關關閉時本欄不生效）"
+    )
+    period: int = Field(
+        default=20,
+        ge=2,
+        description="均線回看的交易日根數（台股慣例：月 20／季 60／半年 120／年 240）"
+    )
+
+
+class MaAlertConfig(BaseModel):
+    """
+    均線觸價通知設定（spec 014）。
+
+    **刻意不放進 `SingleStrategyParams`**：那承載的是會進入回測、會被 optimizer
+    掃描、會影響訊號的「策略參數」；本區塊是「通知偏好」——不進回測、
+    不影響任何訊號、不該被尋優，也不該稀釋 `ticker_overrides`
+    （「這檔用不同的策略參數」）的語意。
+    """
+    ma_alerts_enabled: bool = Field(
+        default=False,
+        description="均線觸價通知總開關。**預設關閉**——新增的通知類型不應在使用者未要求時自行啟用"
+    )
+    monthly: MaLineConfig = Field(
+        default_factory=lambda: MaLineConfig(period=20), description="月線"
+    )
+    quarterly: MaLineConfig = Field(
+        default_factory=lambda: MaLineConfig(period=60), description="季線"
+    )
+    half_yearly: MaLineConfig = Field(
+        default_factory=lambda: MaLineConfig(period=120), description="半年線"
+    )
+    yearly: MaLineConfig = Field(
+        default_factory=lambda: MaLineConfig(period=240), description="年線"
+    )
+
+    def enabled_periods(self) -> Dict[str, int]:
+        """回傳已啟用之線別 → 週期；總開關關閉時回傳空 dict（呼叫端據此短路）。"""
+        if not self.ma_alerts_enabled:
+            return {}
+        return {
+            name: line.period
+            for name, line in (
+                ("monthly", self.monthly),
+                ("quarterly", self.quarterly),
+                ("half_yearly", self.half_yearly),
+                ("yearly", self.yearly),
+            )
+            if line.enabled
+        }
+
+    def all_periods(self) -> Dict[str, int]:
+        """回傳四條線的週期（不受開關影響）——供儀表板現況表使用（US4）。"""
+        return {
+            "monthly": self.monthly.period,
+            "quarterly": self.quarterly.period,
+            "half_yearly": self.half_yearly.period,
+            "yearly": self.yearly.period,
+        }
+
+
 class SystemConfig(BaseModel):
     """
     全域系統配置規格模型
@@ -298,6 +364,8 @@ class SystemConfig(BaseModel):
     trading_cost: TradingCostConfig = Field(default_factory=TradingCostConfig)
     portfolio: PortfolioConfig = Field(default_factory=PortfolioConfig)
     data_quality: DataQualityConfig = Field(default_factory=DataQualityConfig)
+    # spec 014：均線觸價通知（通知偏好，與策略參數分離——見 MaAlertConfig docstring）
+    alerts: MaAlertConfig = Field(default_factory=MaAlertConfig)
 
     @model_validator(mode="after")
     def _no_short_on_equity_overrides(self) -> "SystemConfig":

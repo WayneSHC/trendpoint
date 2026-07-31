@@ -62,7 +62,13 @@ python monitor_signals.py --once   # 單次訊號檢測與推播
   **盤中提示，非回測驗證過的訊號**（推播訊息已附註記）。
   「對齊時框」在現行資料源下不可行——yfinance 的 5m 只給 5 天（約 270 根），
   跑不出統計意義；真要做需先換資料源。詳見
-  `docs/reviews/2026-07-30-tradingview-mcp-workflow-review.md`
+  `docs/reviews/2026-07-30-tradingview-mcp-workflow-review.md`。
+  **均線觸價通知**（spec 014）：`ma_lines.py`（純函式：均線計算＋向下穿越判定，
+  刻意與 `ladder_system.py` 分離——它是通知用參考價位，**不進訊號或回測路徑**）。
+  時基刻意混合：均線取 DB 日線（年線需 240 根日線，5 分線算不出來）、
+  比較價取 5 分線已收盤棒；兩條資料路徑**並存**，改動任一端前先讀
+  `specs/014-ma-touch-alerts/research.md` D1。總開關 `alerts.ma_alerts_enabled`
+  預設關閉。此案是 `stock_*_daily` 在監控端的第一個消費者
 - UI：`app.py`（Streamlit，禁止內嵌演算法邏輯）
 - 規格：`specs/001` 為 as-built 基準；`002`（FVG 確認）已併入 main；
   `007`（MSS fractal 反轉進場）已併入 main（SC-003 未達成如實記錄），短腿由 003 解封；
@@ -77,6 +83,10 @@ python monitor_signals.py --once   # 單次訊號檢測與推播
   凡「價位 × 乘數」型計算一律用未調整價；**禁止**由「調整後 − 位移量」回推
   （位移量是未來轉倉的函數且非截斷不變）。期貨資料缺 `unadj_*` 時回測硬失敗
   不 fallback，故所有期貨來源（含 mock）皆須產出該欄位；
+  `014`（均線觸價通知，`specs/014-ma-touch-alerts`）已實作——月/季/半年/年線
+  向下穿越推播（總開關預設關閉）＋儀表板均線現況表；通知層功能、不進訊號路徑，
+  故無回測對照需求。`012`（BOS 量能確認）、`013`（進場閘門：回撤上限＋結算日封鎖）
+  規格與計畫齊備、**尚未實作**（兩案的驗收需真實資料，見各自 tasks.md 的 A/B 段標示）；
   `004~006` 見各 spec.md 狀態。新功能走 Spec Kit：
   `/speckit-specify` → `/speckit-plan` → `/speckit-tasks` → `/speckit-implement`
 - 理論：`three_bands_theory.md`、`docs/ladder-optimization-research.md`（階梯優化研究，

@@ -23,7 +23,7 @@ description: "Task list for 014 — 均線觸價通知（月／季／半年／�
 - **[Story]**: US1 / US2 / US3 / US4；Setup、Foundational、Polish 階段無標籤
 - **[A] / [B]**: 驗收環境切分（plan.md §驗收環境切分）
   - **[A]** 離線可完成且可驗收——合成資料即足，CI 可跑
-  - **[B]** 需真實市場資料（`trendpoint.db`），**必須在本機執行**。本案僅 T024 一項
+  - **[B]** 需真實市場資料（`trendpoint.db`），**必須在本機執行**。本案僅 T028 一項
 
 ## Path Conventions
 
@@ -45,8 +45,8 @@ description: "Task list for 014 — 均線觸價通知（月／季／半年／�
 
 **Purpose**: 備妥可精確控制觸發條件的合成資料，並凍結既有六種告警的產出。
 
-- [ ] T001 [A] 在 `tests/fixtures/` 建立本案合成資料產生器（固定 seed），提供：(a) 足夠長的日線序列（≥ 300 根，供四條線皆可計算）、(b) 僅 100 根的日線序列（供資料不足測試）、(c) 5 分線序列且可指定其收盤價相對指定均線值的位置（自上方跌破／持續低於／同日反覆穿越三種型態）
-- [ ] T002 [A] 以 T001 的 5 分線 fixture 在**未改碼**狀態下執行 `check_new_signals`，將既有六種告警的產出集合（alert_type、bar_time、訊息內容）存為入版控的測試期望檔（`tests/fixtures/014_baseline_alerts.json`），檔頭註記 commit SHA — 此為 SC-001 的比對來源
+- [X] T001 [A] 在 `tests/ma_fixtures.py` 建立本案合成資料產生器（沿用 repo 既有的 `tests/acceptance_fixtures.py` 命名慣例，不另開子目錄）（固定 seed），提供：(a) 足夠長的日線序列（≥ 300 根，供四條線皆可計算）、(b) 僅 100 根的日線序列（供資料不足測試）、(c) 5 分線序列且可指定其收盤價相對指定均線值的位置（自上方跌破／持續低於／同日反覆穿越三種型態）
+- [X] T002 [A] 以 T001 的 5 分線 fixture 在**未改碼**狀態下執行 `check_new_signals`，將既有六種告警的產出集合（alert_type、bar_time、訊息內容）存為入版控的測試期望檔（`tests/fixtures_014_baseline_alerts.json`），檔頭註記 commit SHA — 此為 SC-001 的比對來源
 
 **Checkpoint**: 合成資料可精確控制觸發、既有告警行為已凍結
 
@@ -58,12 +58,12 @@ description: "Task list for 014 — 均線觸價通知（月／季／半年／�
 
 **⚠️ CRITICAL**: 本階段未完成前，任何 user story 都無法開始
 
-- [ ] T003 [P] [A] 在 `tests/test_ma_lines.py` 新增 `compute_ma_set` 契約測試（**先紅**）：(a) 均線值＝最後 period 根收盤價算術平均，與手算一致（誤差 0）、(b) `len < period` 之線回傳 **`None`**（非 NaN、非 0）、(c) 單一條線資料不足不影響其他線、(d) 不就地修改輸入 — 對應 contracts §1、SC-005/006
-- [ ] T004 [A] 建立 `ma_lines.py` 實作 `compute_ma_set(daily_close, periods)`（T003 轉綠）。**檔頭加 MPL-2.0 標頭**（CLAUDE.md 授權節）。**嚴禁 `min_periods=1`**——須在函式 docstring 寫明「`ladder_system.py:463` 的 `min_periods=1` 是為回測暖機期而設，語意相反，不得沿用；用於通知會由不足資料算出假均線」。模組不得 import `monitor_signals` / `backtester` / `ladder_system` — FR-006
-- [ ] T005 [P] [A] 在 `tests/test_ma_lines.py` 新增 `detect_cross_below` 契約測試（**先紅**）：(a) `prev > ma and curr <= ma` 成立時回傳該線、(b) `curr == ma`（觸及）亦成立（對應「達到或低於」）、(c) 持續低於（`prev <= ma`）不成立、(d) `ma` 為 `None` 之線被略過且不拋錯、(e) 回傳可為空 list — 對應 contracts §2、SC-002/003
-- [ ] T006 [A] 在 `ma_lines.py` 實作 `detect_cross_below(prev_price, curr_price, ma_set)`（T005 轉綠）；docstring 須寫明「僅偵測向下穿越；向上突破不在本案範圍」— FR-004
-- [ ] T007 [P] [A] 在 `config/config.py` 新增 `MaLineConfig`（`enabled: bool`、`period: int = Field(ge=2)`）與 `MaAlertConfig`（`ma_alerts_enabled: bool = False` 總開關 + 四條線），並在 `SystemConfig` 新增 `alerts: MaAlertConfig` 欄位（與 `data`/`strategy`/`trading_cost`/`portfolio` 並列，`config/config.py:291-300`）。**不得**放進 `SingleStrategyParams`（理由見 research.md D3）— FR-011
-- [ ] T008 [P] [A] 在 `config/config.yaml` 新增 `alerts` 區塊（`ma_alerts_enabled: false`；四條線 enabled 皆 true、週期 20/60/120/240），加註解說明「總開關預設關閉；這些是通知偏好、非策略參數，故不進 strategy 區塊」
+- [X] T003 [P] [A] 在 `tests/test_ma_lines.py` 新增 `compute_ma_set` 契約測試（**先紅**）：(a) 均線值＝最後 period 根收盤價算術平均，與手算一致（誤差 0）、(b) `len < period` 之線回傳 **`None`**（非 NaN、非 0）、(c) 單一條線資料不足不影響其他線、(d) 不就地修改輸入 — 對應 contracts §1、SC-005/006
+- [X] T004 [A] 建立 `ma_lines.py` 實作 `compute_ma_set(daily_close, periods)`（T003 轉綠）。**檔頭加 MPL-2.0 標頭**（CLAUDE.md 授權節）。**嚴禁 `min_periods=1`**——須在函式 docstring 寫明「`ladder_system.py:463` 的 `min_periods=1` 是為回測暖機期而設，語意相反，不得沿用；用於通知會由不足資料算出假均線」。模組不得 import `monitor_signals` / `backtester` / `ladder_system` — FR-006
+- [X] T005 [P] [A] 在 `tests/test_ma_lines.py` 新增 `detect_cross_below` 契約測試（**先紅**）：(a) `prev > ma and curr <= ma` 成立時回傳該線、(b) `curr == ma`（觸及）亦成立（對應「達到或低於」）、(c) 持續低於（`prev <= ma`）不成立、(d) `ma` 為 `None` 之線被略過且不拋錯、(e) 回傳可為空 list — 對應 contracts §2、SC-002/003
+- [X] T006 [A] 在 `ma_lines.py` 實作 `detect_cross_below(prev_price, curr_price, ma_set)`（T005 轉綠）；docstring 須寫明「僅偵測向下穿越；向上突破不在本案範圍」— FR-004
+- [X] T007 [P] [A] 在 `config/config.py` 新增 `MaLineConfig`（`enabled: bool`、`period: int = Field(ge=2)`）與 `MaAlertConfig`（`ma_alerts_enabled: bool = False` 總開關 + 四條線），並在 `SystemConfig` 新增 `alerts: MaAlertConfig` 欄位（與 `data`/`strategy`/`trading_cost`/`portfolio` 並列，`config/config.py:291-300`）。**不得**放進 `SingleStrategyParams`（理由見 research.md D3）— FR-011
+- [X] T008 [P] [A] 在 `config/config.yaml` 新增 `alerts` 區塊（`ma_alerts_enabled: false`；四條線 enabled 皆 true、週期 20/60/120/240），加註解說明「總開關預設關閉；這些是通知偏好、非策略參數，故不進 strategy 區塊」
 
 **Checkpoint**: 兩個純函式可獨立測試通過、參數可讀
 
@@ -78,9 +78,9 @@ description: "Task list for 014 — 均線觸價通知（月／季／半年／�
 > 本階段置於 US1 之前，是因為 T009 的接線位置決定了 US1 能否安全實作——
 > 先把「不能碰哪裡」釘死，再往上加功能。
 
-- [ ] T009 [US2] [A] 在 `monitor_signals.check_new_signals` 的**現貨分支尾端**（既有六種告警之後）新增均線判定區塊的骨架：總開關關閉時**直接 return / 短路，不讀日線表**。**禁止**修改 `monitor_signals.py:167` 的 5 分線 fetch、**禁止**讓均線判定共用 `build_indicator_frame` 的輸出（那來自 5 分線，算不出月線以上任何一條）— FR-008，contracts §3
-- [ ] T010 [US2] [A] 在 `tests/test_ma_alerts.py` 新增 SC-001 **三層**回歸測試：(a) 總開關關閉時六種告警產出集合與 T002 期望檔逐則相同、(b) 關閉時**日線表讀取次數為 0**（以 mock 或計數器驗證真正短路，而非「讀了但沒用」）、(c) 總開關開啟時六種告警產出集合**仍與關閉時相同**（只多出均線通知）
-- [ ] T011 [P] [US2] [A] 新增 SC-007 測試：總開關關閉→完全不發；總開關開啟但單線關閉→該線不發、其餘線正常
+- [X] T009 [US2] [A] 在 `monitor_signals.check_new_signals` 的**現貨分支尾端**（既有六種告警之後）新增均線判定區塊的骨架：總開關關閉時**直接 return / 短路，不讀日線表**。**禁止**修改 `monitor_signals.py:167` 的 5 分線 fetch、**禁止**讓均線判定共用 `build_indicator_frame` 的輸出（那來自 5 分線，算不出月線以上任何一條）— FR-008，contracts §3
+- [X] T010 [US2] [A] 在 `tests/test_ma_alerts.py` 新增 SC-001 **三層**回歸測試：(a) 總開關關閉時六種告警產出集合與 T002 期望檔逐則相同、(b) 關閉時**日線表讀取次數為 0**（以 mock 或計數器驗證真正短路，而非「讀了但沒用」）、(c) 總開關開啟時六種告警產出集合**仍與關閉時相同**（只多出均線通知）
+- [X] T011 [P] [US2] [A] 新增 SC-007 測試：總開關關閉→完全不發；總開關開啟但單線關閉→該線不發、其餘線正常
 
 **Checkpoint**: 既有告警的不變性已由 CI 常態守門，可安全往上加功能
 
@@ -92,16 +92,16 @@ description: "Task list for 014 — 均線觸價通知（月／季／半年／�
 
 **Independent Test**: 以合成資料構造自均線上方跌破，確認發出且僅發出一則對應通知。
 
-- [ ] T012 [US1] [A] 在 `monitor_signals.py` 的均線判定區塊實作日線讀取：以 `safe_load_db_data(DB_PATH, table_name_for(instrument, "daily"))` 取現貨日線；**僅使用已收盤日線**（若含當日進行中的列須排除）— FR-002
-- [ ] T013 [US1] [A] 接上 `compute_ma_set`（週期與開關取自 `cfg.alerts`），對 `enabled` 為 false 的線不計算不判定 — FR-001/FR-007
-- [ ] T014 [US1] [A] 接上 `detect_cross_below`，**前值與現值取自既有 `select_closed_bar_indices` 的 `prev_bar['close']` / `latest_bar['close']`**（`monitor_signals.py:94-106`，與既有三關價判定同源 `:230`）。**禁止**以「前一日日線收盤」作為前值——會漏判開盤跳空跌破。此處須加註解寫明理由 — FR-003/FR-004，research.md D2
-- [ ] T015 [US1] [A] 實作推播與去重：`alert_type` 依線別命名（`MA_CROSS_BELOW_MONTHLY` 等，見 data-model.md §3），**`bar_time` 填交易日（`latest_time.date()`）而非 5 分線時間戳**。此粒度與既有六種告警不同，須加註解寫明理由（均線在同一交易日內為常數，同日多次穿越指的是同一件事），避免被後人「統一」掉 — FR-005，research.md D5
-- [ ] T016 [US1] [A] 訊息內容含標的、線別、均線值、當前價、乖離幅度、時間；沿用既有 `intraday_note` 盤中註記 — FR-009
-- [ ] T017 [US1] [A] 期貨標的完全不進入均線判定（沿用既有 `is_futures` 分支）；日線表不存在或為空時跳過該標的並輸出可辨識提示，**不得拋錯中斷其他標的的監控** — FR-010/FR-012
-- [ ] T018 [P] [US1] [A] 新增 SC-002 測試：構造價格依序穿過四條線的序列，四條線各發出且僅發出一則
-- [ ] T019 [P] [US1] [A] 新增 SC-003 測試：穿越後連續多根皆低於均線，**僅第一次發出**，後續不再發送
-- [ ] T020 [P] [US1] [A] 新增 SC-004 測試：同一交易日內於均線附近反覆上下穿越，該標的該線當日**至多一則**
-- [ ] T021 [P] [US1] [A] 新增 SC-008/SC-009 測試：訊息含 FR-009 全部欄位且線別可辨識；日線表缺失時該標的被跳過而**其他標的的監控照常完成**
+- [X] T012 [US1] [A] 在 `monitor_signals.py` 的均線判定區塊實作日線讀取：以 `safe_load_db_data(DB_PATH, table_name_for(instrument, "daily"))` 取現貨日線；**僅使用已收盤日線**（若含當日進行中的列須排除）— FR-002
+- [X] T013 [US1] [A] 接上 `compute_ma_set`（週期與開關取自 `cfg.alerts`），對 `enabled` 為 false 的線不計算不判定 — FR-001/FR-007
+- [X] T014 [US1] [A] 接上 `detect_cross_below`，**前值與現值取自既有 `select_closed_bar_indices` 的 `prev_bar['close']` / `latest_bar['close']`**（`monitor_signals.py:94-106`，與既有三關價判定同源 `:230`）。**禁止**以「前一日日線收盤」作為前值——會漏判開盤跳空跌破。此處須加註解寫明理由 — FR-003/FR-004，research.md D2
+- [X] T015 [US1] [A] 實作推播與去重：`alert_type` 依線別命名（`MA_CROSS_BELOW_MONTHLY` 等，見 data-model.md §3），**`bar_time` 填交易日（`latest_time.date()`）而非 5 分線時間戳**。此粒度與既有六種告警不同，須加註解寫明理由（均線在同一交易日內為常數，同日多次穿越指的是同一件事），避免被後人「統一」掉 — FR-005，research.md D5
+- [X] T016 [US1] [A] 訊息內容含標的、線別、均線值、當前價、乖離幅度、時間；沿用既有 `intraday_note` 盤中註記 — FR-009
+- [X] T017 [US1] [A] 期貨標的完全不進入均線判定（沿用既有 `is_futures` 分支）；日線表不存在或為空時跳過該標的並輸出可辨識提示，**不得拋錯中斷其他標的的監控** — FR-010/FR-012
+- [X] T018 [P] [US1] [A] 新增 SC-002 測試：構造價格依序穿過四條線的序列，四條線各發出且僅發出一則
+- [X] T019 [P] [US1] [A] 新增 SC-003 測試：穿越後連續多根皆低於均線，**僅第一次發出**，後續不再發送
+- [X] T020 [P] [US1] [A] 新增 SC-004 測試：同一交易日內於均線附近反覆上下穿越，該標的該線當日**至多一則**
+- [X] T021 [P] [US1] [A] 新增 SC-008/SC-009 測試：訊息含 FR-009 全部欄位且線別可辨識；日線表缺失時該標的被跳過而**其他標的的監控照常完成**
 
 **Checkpoint**: 推播功能完整可用（總開關仍預設關閉）
 
@@ -115,7 +115,7 @@ description: "Task list for 014 — 均線觸價通知（月／季／半年／�
 
 > 純函式層的資料不足處理已由 T003/T004 完成，本階段驗證其在 monitor 端的端到端行為。
 
-- [ ] T022 [P] [US3] [A] 新增 SC-005 端到端測試：以 T001 的 100 根日線 fixture 執行 `check_new_signals`，斷言月線與季線可正常判定與發送、**半年線與年線不發出任何通知**，且該標的其他線不受影響
+- [X] T022 [P] [US3] [A] 新增 SC-005 端到端測試：以 T001 的 100 根日線 fixture 執行 `check_new_signals`，斷言月線與季線可正常判定與發送、**半年線與年線不發出任何通知**，且該標的其他線不受影響
 
 ---
 
@@ -129,8 +129,8 @@ description: "Task list for 014 — 均線觸價通知（月／季／半年／�
 > 本階段雖列 P3，但它是「只做穿越、不做狀態播報」這個決策**得以成立的前提**——
 > 少了它，「沒收到通知」會被誤讀為「在均線之上」。**不得只做一半**。
 
-- [ ] T023 [US4] [A] 在 `app.py` 單一標的檢視（非 PORTFOLIO 模式）新增「均線現況」表：每條線一列，欄位為線別／均線值／目前價／位置（在上、在下）／乖離幅度。沿用該檢視既有的日線載入（`app.py:404-414`），演算法一律呼叫 `ma_lines` 純函式、**不得在 UI 層內嵌計算**（CLAUDE.md：UI 僅負責呈現）。資料不足之線 **MUST 顯示「資料不足」，不得顯示空白或 0** — FR-013
-- [ ] T024 [P] [US4] [A] 新增 SC-011/SC-012 測試：對「已低於年線但近期無穿越」之標的，現況表正確顯示位置與乖離**且不觸發任何推播**（FR-014）；資料不足之線顯示「資料不足」
+- [X] T023 [US4] [A] 在 `app.py` 單一標的檢視（非 PORTFOLIO 模式）新增「均線現況」表：每條線一列，欄位為線別／均線值／目前價／位置（在上、在下）／乖離幅度。沿用該檢視既有的日線載入（`app.py:404-414`），演算法一律呼叫 `ma_lines` 純函式、**不得在 UI 層內嵌計算**（CLAUDE.md：UI 僅負責呈現）。資料不足之線 **MUST 顯示「資料不足」，不得顯示空白或 0** — FR-013
+- [X] T024 [P] [US4] [A] 新增 SC-011/SC-012 測試：對「已低於年線但近期無穿越」之標的，現況表正確顯示位置與乖離**且不觸發任何推播**（FR-014）；資料不足之線顯示「資料不足」
 
 **Checkpoint**: 四個 user story 的 A 段全部完成，可合併
 
@@ -138,12 +138,45 @@ description: "Task list for 014 — 均線觸價通知（月／季／半年／�
 
 ## Phase 7: Polish & Cross-Cutting
 
-- [ ] T025 [A] `pytest -q` 全綠；並跑 `pytest -rs` 逐條檢查 skip 理由——**本案新測試若因缺 `trendpoint.db` 而 skip，即代表 A 段設計失敗**（A 段一律以合成資料執行）
-- [ ] T026 [P] [A] 更新 `CLAUDE.md`：專案地圖的通知段補上「均線觸價通知（spec 014，總開關預設關閉）」與 `ma_lines.py`；並註明本案使 `stock_*_daily` 在監控端有了第一個消費者
-- [ ] T027 [P] [A] 更新 `README.md` 的功能說明與設定範例（`alerts` 區塊），說明四條線的預設週期與總開關預設關閉
+- [X] T025 [A] `pytest -q` 全綠；並跑 `pytest -rs` 逐條檢查 skip 理由——**本案新測試若因缺 `trendpoint.db` 而 skip，即代表 A 段設計失敗**（A 段一律以合成資料執行）
+- [X] T026 [P] [A] 更新 `CLAUDE.md`：專案地圖的通知段補上「均線觸價通知（spec 014，總開關預設關閉）」與 `ma_lines.py`；並註明本案使 `stock_*_daily` 在監控端有了第一個消費者
+- [X] T027 [P] [A] 更新 `README.md` 的功能說明與設定範例（`alerts` 區塊），說明四條線的預設週期與總開關預設關閉
 - [ ] T028 [B] **[需真實資料]** SC-013 實跑驗收：`python run_ingestion.py` → 於 config 開啟 `alerts.ma_alerts_enabled: true` → `python monitor_signals.py --once`（無憑證走 Mock 分支）。觀察四項：(a) 均線值可與看盤軟體目視對照、(b) 訊息含 FR-009 全部欄位、(c) **既有六種告警照常運作且內容未變**、(d) 資料不足的標的被正確跳過而非發出假均線。另跑 `streamlit run app.py` 確認現況表顯示正確
 
 ---
+
+## 實作結果（2026-07-30，A 段完成）
+
+**27/28 完成；僅 T028（B 段，需 `trendpoint.db`）待使用者於本機執行。**
+
+- **測試**：`pytest -q` → **264 passed / 1 skipped / 1 deselected**
+  （實作前為 234 passed，本案新增 30 個測試）。
+  `pytest -rs` 確認唯一的 skip 是既有的 `test_portfolio_backtester.py:134`
+  （需 `trendpoint.db`）——**本案新測試無一跳過**，A 段設計成立。
+- **新增檔案**：`ma_lines.py`（純函式，MPL-2.0 標頭）、
+  `tests/test_ma_lines.py`（14 測試）、`tests/test_ma_alerts.py`（16 測試）、
+  `tests/ma_fixtures.py`、`tests/fixtures_014_baseline_alerts.json`（基準，
+  commit `537ef25`）。
+- **修改檔案**：`monitor_signals.py`（新增 `check_ma_touch_alerts`，
+  既有 5 分線路徑與六種告警未動）、`config/config.py`（`MaLineConfig` /
+  `MaAlertConfig` / `SystemConfig.alerts`）、`config/config.yaml`（`alerts` 區塊）、
+  `app.py`（均線現況表 + `ma_lines` import）、`CLAUDE.md`、`README.md`。
+- **零改動**（符合 plan 的範圍宣告）：`backtester.py`、`ladder_system.py`、
+  `trading_costs.py`、`performance.py`。
+
+**實作過程中的兩個修正**（記錄以供後續參考）：
+
+1. **T002 首次擷取的基準為空集合**（0 則告警），該基準無鑑別力——
+   「實作前 0 則、實作後 0 則」的比對抓不到任何回歸。根因是
+   `frame_from_closes` 以**百分比**外擴 high/low，價位越高外擴越大，
+   使「前一根 high」蓋過「本根收盤」、突破型訊號永不成立。
+   改為**絕對值** pad 後基準含 1 則 `BULLISH_BOS`，比對才有意義。
+2. **測試初版的訊息過濾條件過鬆**（以「跌破」二字辨識均線通知），
+   誤將既有的「跌破下關價」與「BOS 結構連續跌破」計入，SC-002 誤判為 6 則。
+   改以均線通知獨有的「乖離:」欄位為判準。
+
+**尚未經人工目視確認**：`app.py` 的均線現況表（Streamlit 畫面）僅由
+`ma_lines.build_status_rows` 的單元測試涵蓋其資料，實際渲染屬 T028 範圍。
 
 ## Dependencies
 

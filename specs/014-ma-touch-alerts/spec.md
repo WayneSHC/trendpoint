@@ -4,7 +4,7 @@
 
 **Created**: 2026-07-30
 
-**Status**: Draft
+**Status**: Implemented（2026-07-30，A 段 SC-001~012 全數通過；SC-013 為 [MANUAL]，待使用者於本機執行——見 tasks.md T028）
 
 **Input**: User description: "我想要當該股票的價格達到或低於 月/季/半年/年線的價格時就發通知訊息"
 

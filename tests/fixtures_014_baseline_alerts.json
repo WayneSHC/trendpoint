@@ -1,0 +1,16 @@
+{
+  "_comment": "spec 014 T002：本案實作前的既有六種告警產出，SC-001 的比對來源。以 tests/ma_fixtures.trending_intraday_frame(n_days=3) 產生、monitor_signals.check_new_signals 執行所得。請勿手動編輯。",
+  "baseline_commit": "537ef25b1ff98587dd0531c942a4702a77bfb900",
+  "fixture": "tests.ma_fixtures.trending_intraday_frame(n_days=3)",
+  "ticker": "TEST.TW",
+  "sent_alerts": [
+    {
+      "ticker": "TEST.TW",
+      "bar_time": "2026-06-03 13:25:00",
+      "alert_type": "BULLISH_BOS"
+    }
+  ],
+  "messages": [
+    "<b>【多頭趨勢延續】</b>\n標的: TEST.TW\n時間: 2026-06-03 13:25:00\n價格: 180.50\n說明: 偵測到 BOS 結構連續突破，多頭力道持續加強！\n當前階梯參考價: 180.50\n\n※ 盤中提示，非回測驗證訊號（監控走盤中時框與硬編碼結構參數；回測走日線與 config 參數）。"
+  ]
+}

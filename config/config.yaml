@@ -87,6 +87,24 @@ strategy:
       chandelier_period: 22
       ladder_k: 1.5
       time_limit: 15
+# spec 014：均線觸價通知。這些是「通知偏好」而非策略參數——不進回測、不影響
+# 任何訊號、不被 optimizer 掃描，故獨立於 strategy 區塊之外。
+# 總開關預設關閉：新增的通知類型不應在使用者未要求時自行啟用。
+# 週期為台股慣例的交易日根數（部分券商用 21/62/124/248，依偏好調整）。
+alerts:
+  ma_alerts_enabled: false
+  monthly:
+    enabled: true
+    period: 20
+  quarterly:
+    enabled: true
+    period: 60
+  half_yearly:
+    enabled: true
+    period: 120
+  yearly:
+    enabled: true
+    period: 240
 trading_cost:
   commission_rate: 0.001425
   slip_rate: 0.0005

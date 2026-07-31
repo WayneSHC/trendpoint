@@ -252,6 +252,94 @@ def check_new_signals(ticker: str, alert_mgr: AlertManager, instrument=None):
             if alert_mgr.send_alert(mock_prefix + msg + intraday_note):
                 mark_alert_as_sent(ticker, latest_time, alert_type)
 
+    # 訊號 D（spec 014）：均線觸價通知（月／季／半年／年線）
+    # ------------------------------------------------------------------
+    # 這是**額外一段**，不是上方任何邏輯的替換。上方六種告警走 5 分線即時
+    # 路徑（現貨；刻意設計，見 CLAUDE.md 監控段），本段另行讀取日線表——
+    # 年線需要 240 根**日線**，5 天的 5 分線（約 270 根 5 分鐘棒）算不出來。
+    # 兩條資料路徑並存；**嚴禁**把上方的 fetch_stock_data 改成日線（會使既有
+    # 六種告警全部改判、行為徹底改變）。
+    check_ma_touch_alerts(ticker, alert_mgr, instrument,
+                          latest_bar=latest_bar, prev_bar=prev_bar,
+                          latest_time=latest_time, is_futures=is_futures,
+                          mock_prefix=mock_prefix, intraday_note=intraday_note)
+
+
+def check_ma_touch_alerts(ticker, alert_mgr, instrument, *,
+                          latest_bar, prev_bar, latest_time,
+                          is_futures: bool, mock_prefix: str, intraday_note: str):
+    """
+    均線觸價通知（spec 014）：股價向下穿越月／季／半年／年線時推播。
+
+    時基刻意混合（spec 014 FR-002／FR-003）：
+      - **均線**取自 DB 日線表（已收盤、盤中執行時為前一交易日為止）
+      - **比較價**取自呼叫端傳入的 5 分線已收盤棒
+
+    因為使用者要知道的是「**現在**跌到均線了」，而非「昨天收在均線下」。
+
+    去重粒度為「每標的每線每**交易日**至多一則」——`bar_time` 填交易日而非
+    K 線時間戳。這與上方六種告警（填 K 線時間戳、每根至多一則）**刻意不同**：
+    均線在同一交易日內是常數，同一天內的多次穿越指的是同一件事。
+    **請勿為了「一致」而把兩者統一。**
+    """
+    periods = cfg.alerts.enabled_periods()
+    if not periods:
+        return                      # 總開關關閉或四條線全關 → 完全短路，不讀日線表
+
+    if is_futures:
+        # FR-010：期貨連續表經 back-adjust，早年價位與當年真實市價脫節
+        # （spec 011 的核心問題），其「年線」在價位語意上不可靠，明確排除。
+        return
+
+    from db_security import safe_load_db_data, table_name_for
+    from instruments import equity_instrument
+    import ma_lines
+
+    inst = instrument if instrument is not None else equity_instrument(ticker)
+    try:
+        daily = safe_load_db_data(DB_PATH, table_name_for(inst, "daily"))
+    except Exception as e:
+        # FR-012：不得中斷其他標的的監控
+        print(f"提示：{ticker} 均線通知略過——日線表讀取失敗（{e}）。")
+        return
+
+    if daily is None or daily.empty or 'close' not in daily.columns:
+        print(f"提示：{ticker} 均線通知略過——日線資料不存在或為空（請先執行 run_ingestion）。")
+        return
+
+    # FR-002：僅使用已收盤日線。盤中執行時 DB 內最新日線本就是前一交易日
+    # （ingestion 排程於收盤後執行），但收盤後執行的情境可能已含當日，
+    # 故明確排除「與比較價同一交易日」的那一根。
+    daily_close = daily['close']
+    today = pd.Timestamp(latest_time).normalize()
+    daily_close = daily_close[daily_close.index.normalize() < today]
+
+    ma_set = ma_lines.compute_ma_set(daily_close, periods)
+    triggered = ma_lines.detect_cross_below(
+        prev_price=float(prev_bar['close']),
+        curr_price=float(latest_bar['close']),
+        ma_set=ma_set,
+    )
+
+    trade_date = pd.Timestamp(latest_time).date()
+    price = float(latest_bar['close'])
+
+    for name in ma_lines.ordered_line_names({k: periods[k] for k in triggered}):
+        ma_value = ma_set[name]
+        alert_type = ma_lines.alert_type_for(name)
+        # bar_time 填交易日 → 既有主鍵天然保證「每標的每線每日至多一則」
+        if is_alert_already_sent(ticker, trade_date, alert_type):
+            continue
+        dev = ma_lines.deviation_pct(price, ma_value)
+        label = ma_lines.line_label(name)
+        msg = (f"<b>【跌破{label}】</b>\n標的: {ticker}\n時間: {latest_time}\n"
+               f"價格: {price:.2f}\n{label} ({periods[name]} 日): {ma_value:.2f}\n"
+               f"乖離: {dev:+.2%}\n"
+               f"說明: 股價向下觸及或跌破{label}，請評估後續。")
+        if alert_mgr.send_alert(mock_prefix + msg + intraday_note):
+            mark_alert_as_sent(ticker, trade_date, alert_type)
+
+
 def report_test_alert_result(alert_mgr, sent: bool) -> int:
     """
     回報 --test-alert 的真實結果並決定結束碼。
