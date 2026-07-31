@@ -90,6 +90,18 @@
 - **FR-008**: 回測 MUST 計入手續費、證交稅與滑價；訊號 K 線與成交 K 線之間 MUST 無看前偏誤。
 - **FR-009**: 資料擷取 MUST 通過資料契約驗證（欄位齊全、時間遞增、無負價）後方可入庫（SQLite + CSV）。
 - **FR-010**: 排程監控 MUST 對已發送的（ticker, bar_time, alert_type）去重，避免重複推播。
+- **FR-011**: 時序型績效指標（總報酬率、CAGR、最大回撤、Sharpe、Calmar）MUST 由
+  `performance.py` 的 `compute_performance_metrics` 計算，並由 `backtester.py`、
+  `portfolio_backtester.py`、`walk_forward.py`、`run_backtest.py`、`app.py` 共用。
+  交易統計型指標（總筆數、勝率、獲利因子）as-built 係由 `backtester.py` 以
+  BUY↔SELL_ALL 配對自行計算，**不在** `performance.py` 內。
+  （本條於 2026-07-31 補入 as-built 基準——`performance.py` 先前未被任何 spec 覆蓋。）
+
+  **已知歧異（as-built 如實記錄，不在本 spec 修正）**：`optimizer.py` 的 `_calmar`
+  定義為 `總報酬率 / |MDD|`，而 `performance.py` 的 `calmar_ratio` 定義為 `CAGR / |MDD|`。
+  同一個名稱在「尋優的目標函數」與「對外報告的績效」是兩種不同的量，
+  導致尋優挑出的「最佳參數」與報表呈現的 Calmar 不可互相印證。
+  歸屬 spec 015（尋優紀律與活參數守門）處理。
 
 ### Key Entities
 
