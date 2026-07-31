@@ -71,14 +71,8 @@ python monitor_signals.py --once   # 單次訊號檢測與推播
   凡「價位 × 乘數」型計算一律用未調整價；**禁止**由「調整後 − 位移量」回推
   （位移量是未來轉倉的函數且非截斷不變）。期貨資料缺 `unadj_*` 時回測硬失敗
   不 fallback，故所有期貨來源（含 mock）皆須產出該欄位；
-  `004` 已併入 main；`005`/`006` 仍為 Draft（只有 spec.md、缺 plan/tasks，
-  解封條件見 issue #39/#40）；`012`（排程與持久化＋帳，`specs/012-scheduling-persistence`）
-  spec+plan 完成、**未 implement**；`013`（影子部位與可執行指令）僅有 issue #36。
-  新功能走 Spec Kit：`/speckit-specify` → `/speckit-plan` → `/speckit-tasks` → `/speckit-implement`
-- 詞彙與決策：`CONTEXT.md`（領域詞彙表——**參考訊號／可執行指令／影子部位／帳**
-  等術語的權威定義，動筆前先對齊，勿自創同義詞）、`docs/adr/`（架構決策，
-  含被否決的選項；ADR 0002 已被 0004 取代但保留）
-- 待辦一律開 GitHub issue（2026-07-31 起改用；#35~#43 為第一批）
+  `004~006` 見各 spec.md 狀態。新功能走 Spec Kit：
+  `/speckit-specify` → `/speckit-plan` → `/speckit-tasks` → `/speckit-implement`
 - 理論：`three_bands_theory.md`、`docs/ladder-optimization-research.md`（階梯優化研究，
   原 docx 之正式版）；歷史文件：`TrendPoint_OpenSpec.md`（勿當現行規格）
 
