@@ -1,0 +1,9 @@
+# spec 013 T002 基準凍結（實作前行為）
+# commit: 92b2a44e8611802fc34519f188036099ebcd901c
+# fixture: gate_fixtures.losing_then_recovering_klines()（變體 a）
+# 產生方式: BacktestEngine(initial_capital=1_000_000.0).run_backtest(df, verbose=False)（全預設參數）
+# 以下為 equity_curve 的欄位集（index 名稱另計）——閘門關閉時不得多出 block_reason
+# index.name=datetime
+capital
+position_value
+equity

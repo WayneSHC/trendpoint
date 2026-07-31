@@ -123,6 +123,7 @@ optimizer.py              參數尋優
 walk_forward.py           Walk-Forward 驗證
 monte_carlo.py            蒙地卡羅交易重抽
 performance.py            績效與風險指標
+risk_gates.py             進場閘門（回撤上限 / 結算日封鎖，預設關閉）
 data_ingestion.py         K 線資料下載與清洗
 monitor_signals.py        即時訊號監控
 ma_lines.py               均線觸價通知的純函式元件
@@ -143,8 +144,8 @@ tests/                    pytest 測試套件
 - **功能規格**：`specs/002` 起的各案；狀態以各 `spec.md` 的 Status 欄為準。
   已併入 main 的包含 FVG 確認（002）、台指期做空（003）、MSS 反轉進場（007）、
   資料層與期貨成本（008/009）、TAIFEX 真實資料源（010）、未調整參考價（011）、
-  均線觸價通知（014）；`012`（BOS 量能確認）與 `013`（進場閘門）規格與計畫齊備、
-  尚未實作。
+  均線觸價通知（014）、進場閘門（013，**兩道閘門預設關閉**——是否改為預設啟用
+  需真實資料實測後決定）；`012`（BOS 量能確認）規格與計畫齊備、尚未實作。
 
 新功能開發流程：`/speckit-specify` →（必要時 `/speckit-clarify`）→ `/speckit-plan` →
 `/speckit-tasks` → `/speckit-implement` → `/speckit-analyze`。

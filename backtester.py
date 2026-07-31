@@ -22,6 +22,7 @@ from ladder_system import (
     FULL_EXIT_EVENTS
 )
 from performance import compute_performance_metrics
+from risk_gates import DrawdownGate, settlement_days
 from trading_costs import EquityCostModel, EquitySizer
 
 
@@ -110,6 +111,10 @@ class BacktestEngine:
                      sizer = None,
                      point_value: float = 1.0,
                      enable_short: bool = False,
+                     use_dd_gate: bool = False,
+                     dd_limit_pct: float = 0.20,
+                     dd_resume_pct: float = 0.10,
+                     use_settlement_gate: bool = False,
                      disabled_filters: frozenset = frozenset(),
                      verbose: bool = True) -> Dict[str, Any]:
         """
@@ -138,6 +143,10 @@ class BacktestEngine:
             point_value (float): 每點價值（現股 1.0；期貨 = 契約乘數，P&L = units×Δ價×此值）
             enable_short (bool): 期貨做空開關（spec 003）；僅 asset_class="futures" 時生效
                 ——現貨結構上不存在空方路徑（任何旗標組合下 equity 零空單）
+            use_dd_gate (bool): 啟用回撤閘門（spec 013）；預設關閉，關閉時逐筆逐根位元不變
+            dd_limit_pct (float): 回撤達此幅度停止開新倉（正數表幅度）
+            dd_resume_pct (float): 回撤回升至此幅度以內解除封鎖；須嚴格小於 dd_limit_pct
+            use_settlement_gate (bool): 啟用結算日封鎖（spec 013）；僅期貨生效，現貨無效果不報錯
             disabled_filters (frozenset): 消融測試用，可停用 'structure'/'momentum'/'trend'/'volatility'/'global'/'regime'/'fvg'
             verbose (bool): 是否輸出進度訊息
 
@@ -213,14 +222,51 @@ class BacktestEngine:
         if 'regime_ok_short' not in temp_df.columns:
             temp_df['regime_ok_short'] = True
 
+        # 1b. 進場閘門（spec 013）：路徑相依風控，**只擋開新倉，不碰任何出場路徑**。
+        # 消融語意與既有濾網一致：鍵出現在 disabled_filters 時該閘門視為恆開。
+        # 結算日閘門僅對期貨成立（FR-007）——現貨不建立集合，故對其零效果且不報錯。
+        dd_gate_active = use_dd_gate and ('dd_gate' not in disabled_filters)
+        settlement_gate_active = (
+            use_settlement_gate and is_futures and ('settlement_gate' not in disabled_filters)
+        )
+        # 條件輸出欄的存在條件取「**實際生效**」而非「參數為真」：對現貨啟用結算日
+        # 閘門時不輸出 block_reason，使 SC-008「與未啟用完全相同」在欄位集層級亦成立。
+        # 一欄全空字串只會讓使用者誤以為有風控在保護他（research.md D7 的同一顧慮）。
+        gates_effective = use_dd_gate or (use_settlement_gate and is_futures)
+        dd_gate = (
+            DrawdownGate(initial_equity=self.initial_capital,
+                         limit_pct=dd_limit_pct, resume_pct=dd_resume_pct)
+            if dd_gate_active else None
+        )
+        settlement_set = settlement_days(temp_df.index) if settlement_gate_active else frozenset()
+
         # 2. 模擬交易迴圈
         capital = self.initial_capital
         position_shares = 0.0 # 持有股數
         position_value = 0.0  # 部位市值
-        
+
         equity_curve: List[Dict[str, Any]] = []
         trade_logs: List[Dict[str, Any]] = []
-        
+
+        def record_equity(ts, cap: float, pos_val: float, eq: float, reason: str) -> None:
+            """寫入權益曲線一根，並在同一處推進回撤閘門狀態。
+
+            **這是 FR-004（憲章原則 I）的落點**：閘門必須以「本根權益」在本根
+            **結束時**更新，供**下一根**開頭讀取。搬到迴圈開頭即構成看前偏誤
+            （進場判定會用到含當根收盤價的權益）。tests/test_lookahead_bias.py
+            的 SC-004 專門守此點，勿為了「少一個函式」而把它拆回迴圈裡。
+
+            集中在此還有第二個理由：權益曲線有四個 append 點（多方口數不足、
+            空方口數不足、爆倉截止、正常尾端），其中兩個以 `continue` 跳過迴圈
+            尾端。閘門若只掛在尾端，那兩根就會漏更新。
+            """
+            row = {"datetime": ts, "capital": cap, "position_value": pos_val, "equity": eq}
+            if gates_effective:
+                row["block_reason"] = reason
+            equity_curve.append(row)
+            if dd_gate is not None:
+                dd_gate.update(eq)
+
         pm = PositionManager()
         entry_bar_idx = 0
         
@@ -239,6 +285,18 @@ class BacktestEngine:
             # 濾網用判定根 sig_row、結構訊號用判定根的前一根 struct_row
             sig_row = temp_df.iloc[i - 1]
             struct_row = temp_df.iloc[i - 2] if i >= 2 else None
+
+            # 進場閘門狀態（spec 013）：於本根**開頭**取值——dd_gate.blocked 反映
+            # 第 i-1 根為止的權益（見 record_equity 的說明）。逐根記錄而非只在
+            # 「確實擋掉一筆進場」時記錄：block_reason 是狀態軌跡，不是事件日誌，
+            # 這讓封鎖／解除的轉折可由輸出直接指出確切根索引。
+            block_reasons: List[str] = []
+            if dd_gate is not None and dd_gate.blocked:
+                block_reasons.append("drawdown")
+            if settlement_set and current_time.date() in settlement_set:
+                block_reasons.append("settlement")
+            block_reason = "+".join(block_reasons)
+            gate_ok = not block_reasons
 
             # 若目前無持倉，檢查進場訊號
             if not pm.is_active and position_shares == 0.0:
@@ -305,6 +363,19 @@ class BacktestEngine:
                             short_entry = True
                             short_reason = "MSS 反轉進場做空"
 
+                # ---- 進場閘門接線點（spec 013 FR-002，本案最高風險處）----
+                # 位置是契約的一部分：**必須**在 `if not pm.is_active` 區塊內、
+                # `if is_entry:` 之前，且**只**改寫兩個進場旗標。
+                # 禁止改成迴圈開頭 `continue`——那會連出場判定與權益 append 一起
+                # 跳過，封鎖期間的停損不會執行、權益曲線出現斷點（SC-003 守此點）。
+                # 禁止折進 global_ok——消融將無法區分封鎖來源，封鎖原因也無從記錄。
+                # 禁止塞進 check_entry_signal——該函式是無狀態純判定，混入路徑相依
+                # 狀態會破壞其真值表可測性。
+                # 閘門對多空無方向性：兩個旗標同時被 AND（SC-010 守此點）。
+                if not gate_ok:
+                    is_entry = False
+                    short_entry = False
+
                 if is_entry:
                     # 以次根開盤價成交 (滑價由成本元件計入成交價)
                     raw_price = row['open']
@@ -320,12 +391,7 @@ class BacktestEngine:
                     if position_shares <= 0.0:
                         # 資金不足以買進最小單位（一張/一口），放棄此次訊號
                         current_equity = capital
-                        equity_curve.append({
-                            "datetime": current_time,
-                            "capital": capital,
-                            "position_value": 0.0,
-                            "equity": current_equity
-                        })
+                        record_equity(current_time, capital, 0.0, current_equity, block_reason)
                         continue
 
                     cost = position_shares * execution_price
@@ -382,12 +448,7 @@ class BacktestEngine:
 
                     if position_shares <= 0.0:
                         current_equity = capital
-                        equity_curve.append({
-                            "datetime": current_time,
-                            "capital": capital,
-                            "position_value": 0.0,
-                            "equity": current_equity
-                        })
+                        record_equity(current_time, capital, 0.0, current_equity, block_reason)
                         continue
 
                     entry_costs = cost_model.entry_costs(
@@ -567,23 +628,13 @@ class BacktestEngine:
                         pm.is_active = False
                     blown_up = True
                     current_equity = capital
-                    equity_curve.append({
-                        "datetime": current_time,
-                        "capital": capital,
-                        "position_value": 0.0,
-                        "equity": current_equity
-                    })
+                    record_equity(current_time, capital, 0.0, current_equity, block_reason)
                     break  # 權益曲線截止於爆倉當根（FR-011）
             else:
                 current_equity = capital + (position_shares * row['close'])
                 position_value_now = position_shares * row['close']
 
-            equity_curve.append({
-                "datetime": current_time,
-                "capital": capital,
-                "position_value": position_value_now,
-                "equity": current_equity
-            })
+            record_equity(current_time, capital, position_value_now, current_equity, block_reason)
 
         # 3. 整理回測結果與統計指標
         df_equity = pd.DataFrame(equity_curve).set_index("datetime")

@@ -66,3 +66,49 @@ def test_config_load_and_save_flow():
         # 清理臨時 YAML 檔案
         if os.path.exists(temp_yaml_path):
             os.remove(temp_yaml_path)
+
+
+# ---------------------------------------------------------------- spec 013 進場閘門參數
+
+def test_dd_resume_must_be_strictly_below_limit():
+    """SC-005：恢復門檻 >= 封鎖門檻之設定被 schema 拒絕（相等與反向兩種情形皆測）。"""
+    # 相等：遲滯區間退化為單一門檻 → 逐根翻動
+    with pytest.raises(Exception) as eq_err:
+        SingleStrategyParams(dd_limit_pct=0.10, dd_resume_pct=0.10)
+    assert "dd_resume_pct" in str(eq_err.value)
+
+    # 反向：恢復門檻比封鎖門檻更深，語意上不可能解除
+    with pytest.raises(Exception) as rev_err:
+        SingleStrategyParams(dd_limit_pct=0.10, dd_resume_pct=0.25)
+    assert "dd_resume_pct" in str(rev_err.value)
+
+    # 合法組合不受影響（含 resume=0.0 的特例）
+    assert SingleStrategyParams(dd_limit_pct=0.10, dd_resume_pct=0.0).dd_resume_pct == 0.0
+    assert SingleStrategyParams(dd_limit_pct=0.20, dd_resume_pct=0.10).dd_limit_pct == 0.20
+
+
+def test_entry_gates_default_off():
+    """FR-009：兩道閘門預設關閉——預設值一旦被改，SC-001 的基準保證即失效。"""
+    p = SingleStrategyParams()
+    assert p.use_dd_gate is False
+    assert p.use_settlement_gate is False
+    assert p.dd_limit_pct == 0.20 and p.dd_resume_pct == 0.10
+
+
+def test_entry_gates_are_overridable_per_ticker():
+    """FR-012：四參數皆可經 ticker_overrides 覆寫。"""
+    cfg = SystemConfig()
+    cfg.strategy.ticker_overrides["0050.TW"] = SingleStrategyParams(
+        use_dd_gate=True, dd_limit_pct=0.15, dd_resume_pct=0.05, use_settlement_gate=True
+    )
+    p = cfg.strategy.get_params_for_ticker("0050.TW")
+    assert p.use_dd_gate and p.use_settlement_gate and p.dd_limit_pct == 0.15
+    # 未覆寫的標的仍取 default（閘門關閉）
+    assert cfg.strategy.get_params_for_ticker("2330.TW").use_dd_gate is False
+
+
+def test_shipped_config_yaml_keeps_gates_off():
+    """入版控的 config.yaml 必須維持兩道閘門關閉（B 段實測未完成前不得預設啟用）。"""
+    cfg = load_config()
+    assert cfg.strategy.default.use_dd_gate is False
+    assert cfg.strategy.default.use_settlement_gate is False

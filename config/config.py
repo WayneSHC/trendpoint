@@ -171,6 +171,46 @@ class SingleStrategyParams(BaseModel):
                     "現貨結構上不存在空方路徑（引擎閘門保證）；對現貨 ticker 的 override "
                     "明設 True 會於組態載入時 fail-fast"
     )
+    # ---- 進場閘門（spec 013）：兩道皆預設關閉，關閉時回測行為逐筆逐根不變 ----
+    use_dd_gate: bool = Field(
+        default=False,
+        description="啟用回撤閘門（spec 013）：權益自峰值回落達 dd_limit_pct 時停止開新倉，"
+                    "回升至 dd_resume_pct 以內解除。**只擋進場、不影響任何出場路徑**"
+    )
+    dd_limit_pct: float = Field(
+        default=0.20,
+        gt=0.0, lt=1.0,
+        description="回撤封鎖門檻（正數表幅度，0.20 = 回撤 20%）。預設值僅為形式佔位——"
+                    "閘門預設關閉故不生效；實際值須由 spec 013 SC-015 以 monte_carlo "
+                    "p95 回撤分布校準後決定並記錄依據"
+    )
+    dd_resume_pct: float = Field(
+        default=0.10,
+        ge=0.0, lt=1.0,
+        description="回撤恢復門檻：回撤回升至此值以內解除封鎖。必須嚴格小於 dd_limit_pct"
+                    "（遲滯區間），0.0 代表需回撤完全回復"
+    )
+    use_settlement_gate: bool = Field(
+        default=False,
+        description="啟用結算日封鎖（spec 013）：期貨標的在台指期結算日（每月第三個週三，"
+                    "遇假日順延）不開新倉。對現貨標的無效果且不報錯"
+    )
+
+    @model_validator(mode="after")
+    def _resume_below_limit(self) -> "SingleStrategyParams":
+        """spec 013 FR-005：恢復門檻必須嚴格小於封鎖門檻。
+
+        相等亦拒絕——兩者相等時遲滯區間退化為單一門檻，權益在門檻附近震盪會使
+        閘門逐根翻動（flapping），交易與否取決於小數點後幾位。這是必須被 schema
+        擋下的設定，不是使用者的自由。
+        """
+        if self.dd_resume_pct >= self.dd_limit_pct:
+            raise ValueError(
+                f"dd_resume_pct（{self.dd_resume_pct}）必須嚴格小於 dd_limit_pct"
+                f"（{self.dd_limit_pct}）。兩者之間的遲滯區間是回撤閘門避免逐根翻動的"
+                "唯一機制；相等或反向會讓閘門在門檻附近失去意義。"
+            )
+        return self
 
 class StrategyConfig(BaseModel):
     """

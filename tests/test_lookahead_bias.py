@@ -606,3 +606,117 @@ def test_futures_sizing_uses_unadjusted_close_of_signal_bar():
     per_lot = first["sizing_price"] * 200.0 * cfg.margin_rate
     assert first["shares"] == pytest.approx(
         float(int(10_000_000.0 * cfg.margin_utilization / per_lot)))
+
+
+# ==================== spec 013：進場閘門的看前偏誤防禦（SC-004，T015）====================
+
+def _gate_kwargs():
+    return dict(use_dd_gate=True, dd_limit_pct=0.04, dd_resume_pct=0.03,
+                verbose=False)
+
+
+def test_entry_gate_no_lookahead_on_future_price_tamper():
+    """SC-004：篡改判定根**之後**的價格，不改變其前的閘門判定與進場決策。
+
+    回撤閘門是本 repo 第一個**路徑相依**的判定：它讀自己造成的權益。
+    「rolling 結構要 .shift(1)」那條簡單規則在此不適用，故時序責任落在
+    呼叫順序上——`gate.update()` 必須在迴圈尾端以當根權益更新、供**下一根**
+    開頭讀取。
+
+    鑑別力分工（**已實測確認**）：把 `gate.update()` 搬到迴圈開頭後重跑，
+    本測試與下方的「追加資料」測試**仍然全綠**——因為錯誤的更新時點並不會讓
+    未來資料回頭影響過去，只會讓封鎖提前一根出現。真正抓得到搬動的是本檔第三個
+    測試 `test_entry_gate_reads_state_before_updating_it`（實測下確實轉紅）。
+    三者分工：本測試守「未來→過去」，第三個守「當根→當根」。
+    """
+    from gate_fixtures import losing_then_recovering_klines
+
+    df_orig = losing_then_recovering_klines()
+    engine = BacktestEngine(initial_capital=1_000_000.0)
+
+    split_idx = 2000
+    split_time = df_orig.index[split_idx]
+    df_mod = df_orig.copy()
+    for col in ("open", "high", "low", "close"):
+        df_mod.iloc[split_idx:, df_mod.columns.get_loc(col)] *= 2.0
+
+    res_orig = engine.run_backtest(df_orig, **_gate_kwargs())
+    res_mod = engine.run_backtest(df_mod, **_gate_kwargs())
+
+    br_orig = res_orig["equity_curve"]["block_reason"]
+    br_mod = res_mod["equity_curve"]["block_reason"]
+
+    # 防呆：篡改點之前必須有封鎖與交易，否則本測試恆綠而無驗證力
+    assert (br_orig.iloc[:split_idx - 1] != "").any(), "fixture 失去鑑別力：篡改點前沒有封鎖"
+    assert not res_orig["trades"].empty
+
+    # (1) 閘門狀態軌跡：篡改點之前逐根相同
+    before = split_idx - 1                       # equity_curve 較 df 少首根
+    assert (br_orig.iloc[:before].to_numpy() == br_mod.iloc[:before].to_numpy()).all(), \
+        "未來價格改變了過去的閘門狀態——存在看前偏誤"
+
+    # (2) 進場決策：篡改點之前逐筆相同
+    t_orig = res_orig["trades"]
+    t_mod = res_mod["trades"]
+    b_orig = t_orig[t_orig["datetime"] < split_time].reset_index(drop=True)
+    b_mod = t_mod[t_mod["datetime"] < split_time].reset_index(drop=True)
+    assert len(b_orig) == len(b_mod)
+    for col in ("datetime", "action", "shares", "price"):
+        assert (b_orig[col].to_numpy() == b_mod[col].to_numpy()).all(), \
+            f"未來價格改變了過去的交易（欄 {col}）"
+
+
+def test_entry_gate_no_lookahead_on_appended_future_bars():
+    """SC-004 第二式：序列尾端**追加**資料不改變既有根的閘門與交易。
+
+    比篡改更嚴格的一式——追加資料連「同一根的統計量」都不該動到。
+    """
+    from gate_fixtures import losing_then_recovering_klines
+
+    full = losing_then_recovering_klines()
+    head = full.iloc[:2000]
+    engine = BacktestEngine(initial_capital=1_000_000.0)
+
+    res_head = engine.run_backtest(head, **_gate_kwargs())
+    res_full = engine.run_backtest(full, **_gate_kwargs())
+
+    n = len(res_head["equity_curve"])
+    assert (res_head["equity_curve"]["block_reason"].to_numpy()
+            == res_full["equity_curve"]["block_reason"].iloc[:n].to_numpy()).all(), \
+        "追加未來資料改變了既有根的閘門狀態"
+    assert (res_head["equity_curve"]["equity"].to_numpy()
+            == res_full["equity_curve"]["equity"].iloc[:n].to_numpy()).all()
+
+    cutoff = head.index[-1]
+    t_head = res_head["trades"]
+    t_full = res_full["trades"]
+    t_full = t_full[t_full["datetime"] <= cutoff].reset_index(drop=True)
+    assert len(t_head) == len(t_full)
+    for col in ("datetime", "action", "shares", "price"):
+        assert (t_head[col].to_numpy() == t_full[col].to_numpy()).all()
+
+
+def test_entry_gate_reads_state_before_updating_it():
+    """閘門讀取的是**前一根**為止的狀態——直接以權益曲線驗證更新時點。
+
+    這是「把 update 搬到迴圈開頭」的直接鑑別力測試：封鎖起始根的**前一根**
+    回撤必須已經跨過門檻（即封鎖是前一根更新的結果）。搬到迴圈開頭時封鎖會
+    提前一根出現，該根的前一根回撤尚未達標，本斷言即失敗——實作期間已實測
+    確認轉紅（實得 -3.85% < 門檻 4%）。
+    """
+    from gate_fixtures import losing_then_recovering_klines
+
+    df = losing_then_recovering_klines()
+    res = BacktestEngine(initial_capital=1_000_000.0).run_backtest(df, **_gate_kwargs())
+    eq = res["equity_curve"]["equity"]
+    br = res["equity_curve"]["block_reason"]
+
+    peak = eq.cummax().clip(lower=1_000_000.0)
+    dd = (eq - peak) / peak
+
+    starts = [i for i in range(1, len(br)) if br.iloc[i] != "" and br.iloc[i - 1] == ""]
+    assert starts, "fixture 失去鑑別力：沒有封鎖起點"
+    for i in starts:
+        assert dd.iloc[i - 1] <= -0.04, (
+            f"第 {i} 根被封鎖，但其**前一根**的回撤 {dd.iloc[i - 1]:.4f} 未達門檻——"
+            "代表閘門用到了當根權益（update 被搬到迴圈開頭）")

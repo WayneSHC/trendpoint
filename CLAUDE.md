@@ -43,8 +43,14 @@ python monitor_signals.py --once   # 單次訊號檢測與推播
 
 ## 專案地圖（開場不需要再 ls 探索）
 
-- 演算法核心：`ladder_system.py`（階梯系統）、`performance.py`（KPI）
-- 回測：`backtester.py`（單標的，成本/sizing 走可插拔元件）、`trading_costs.py`
+- 演算法核心：`ladder_system.py`（階梯系統）、`performance.py`（KPI）、
+  `risk_gates.py`（spec 013 進場閘門：`DrawdownGate` 狀態機＋`settlement_days`
+  純函式。**路徑相依風控，與無狀態指標層刻意分離**——它讀自己造成的權益，
+  「rolling 要 .shift(1)」那條規則在此不適用，時序責任改由呼叫順序契約承擔：
+  迴圈開頭讀 `blocked`、尾端 `update()`，搬動即看前偏誤）
+- 回測：`backtester.py`（單標的，成本/sizing 走可插拔元件；spec 013 閘門接線點
+  在 `if not pm.is_active` 區塊內、`if is_entry:` 之前，**只**改寫進場旗標——
+  改成迴圈開頭 `continue` 會連出場與權益 append 一起跳過）、`trading_costs.py`
   （CostModel/PositionSizer 元件 + for_asset_class 工廠，spec 008b：現股 ad-valorem/
   期貨每口定額+保證金槓桿）、`portfolio_backtester.py`（**期貨護欄保留**，僅現貨）、
   `walk_forward.py`、`optimizer.py`、`monte_carlo.py`、`run_*.py` 為各入口
@@ -85,8 +91,12 @@ python monitor_signals.py --once   # 單次訊號檢測與推播
   不 fallback，故所有期貨來源（含 mock）皆須產出該欄位；
   `014`（均線觸價通知，`specs/014-ma-touch-alerts`）已實作——月/季/半年/年線
   向下穿越推播（總開關預設關閉）＋儀表板均線現況表；通知層功能、不進訊號路徑，
-  故無回測對照需求。`012`（BOS 量能確認）、`013`（進場閘門：回撤上限＋結算日封鎖）
-  規格與計畫齊備、**尚未實作**（兩案的驗收需真實資料，見各自 tasks.md 的 A/B 段標示）；
+  故無回測對照需求。`013`（進場閘門：回撤上限＋結算日封鎖，
+  `specs/013-entry-gate-risk-limits`）**A 段已實作**——兩道閘門**預設關閉**，
+  關閉時逐筆、逐根、逐欄與實作前相同（基準凍結於 `tests/fixtures/013_baseline_*`）；
+  是否改為預設啟用需 B 段真實資料實測（SC-014/015），未完成前**不得**宣稱本案
+  「降低了回撤」。`012`（BOS 量能確認）規格與計畫齊備、**尚未實作**
+  （驗收需真實資料，見其 tasks.md 的 A/B 段標示）；
   `004~006` 見各 spec.md 狀態。新功能走 Spec Kit：
   `/speckit-specify` → `/speckit-plan` → `/speckit-tasks` → `/speckit-implement`
 - 理論：`three_bands_theory.md`、`docs/ladder-optimization-research.md`（階梯優化研究，
