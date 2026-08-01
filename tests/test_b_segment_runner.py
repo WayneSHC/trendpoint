@@ -18,6 +18,7 @@ import pytest
 
 import run_b_segment as bs
 from config.config import SystemConfig
+from monte_carlo import bootstrap_trades
 from instruments import AssetClass, ContractSpec, Instrument, equity_instrument
 
 from bos_volume_fixtures import daily_klines, futures_daily_klines
@@ -130,14 +131,42 @@ def test_calibration_reports_unavailable_without_trades():
     assert out["available"] is False
 
 
-def test_calibration_returns_positive_threshold_from_p95():
-    """p95 回撤為負值，門檻取其絕對值。"""
+def test_calibration_returns_positive_threshold_from_the_drawdown_tail():
+    """回撤為負值，門檻取其絕對值。"""
     returns = [0.05, -0.03, 0.02, -0.08, 0.01, -0.02] * 10
     out = bs.calibrate_dd_limit({"trade_returns": returns}, n_sims=500)
     assert out["available"] is True
-    assert out["p95_max_drawdown"] <= 0.0
-    assert out["suggested_dd_limit_pct"] == abs(out["p95_max_drawdown"])
+    assert out["deep_max_drawdown"] <= 0.0
+    assert out["suggested_dd_limit_pct"] == abs(out["deep_max_drawdown"])
     assert 0.0 < out["suggested_dd_limit_pct"] < 1.0
+
+
+def test_calibration_takes_the_deep_tail_not_the_shallow_one():
+    """門檻必須取回撤分布的**深尾**（帶號分布第 5 百分位）。
+
+    這條釘的是一個真的犯過、而且通過了 CI 的錯：`bootstrap_trades` 的
+    `max_drawdown` 是**帶號負值**，所以「回撤幅度的第 95 百分位」對應到
+    帶號分布的**第 5** 百分位。初版取了 95，於是每檔標的都校準出 0.00%
+    的門檻——形同閘門永不觸發，而報表看起來一切正常。
+
+    舊測試用的是虧損偏多的序列，兩端都明顯為負，取錯端也照樣通過。
+    這裡改用**虧損稀有**的序列才有鑑別力：48 抽 1 的虧損率下，約 36%
+    的重抽路徑一次都沒抽中虧損，其回撤恰為 0，淺尾因此被釘在 0；
+    深尾則是連續抽中虧損的路徑，明顯為負。兩端不可能混淆。
+
+    虧損稀有正是真實資料的樣貌——B 段首跑各標的僅 6~7 筆交易、
+    勝率 67~100%，淺尾自然是 0.00%。
+    """
+    returns = [0.03] * 47 + [-0.15]
+    out = bs.calibrate_dd_limit({"trade_returns": returns}, n_sims=2000)
+    mc = bootstrap_trades(returns, n_sims=2000, seed=42)
+
+    assert out["deep_max_drawdown"] == mc["max_drawdown"][5]
+    assert out["suggested_dd_limit_pct"] == abs(mc["max_drawdown"][5])
+
+    # 鑑別力：淺尾在此分布下趨近 0，取錯端會得到不可用的門檻
+    assert abs(mc["max_drawdown"][95]) < 0.01, "淺尾不夠接近 0，此 fixture 失去鑑別力"
+    assert out["suggested_dd_limit_pct"] > 0.02
 
 
 def test_calibration_warns_on_small_sample():
@@ -176,7 +205,7 @@ def test_report_uses_different_yardsticks(capsys, cfg):
 def test_report_flags_small_sample_calibration(capsys):
     bs.print_report("TEST", EQUITY,
                     {"available": True, "n_source_trades": 5,
-                     "p95_max_drawdown": -0.12, "suggested_dd_limit_pct": 0.12,
+                     "deep_max_drawdown": -0.12, "suggested_dd_limit_pct": 0.12,
                      "warning": "交易樣本僅 5 筆 (<30)，任何統計推論都不可靠。"},
                     [])
     out = capsys.readouterr().out
