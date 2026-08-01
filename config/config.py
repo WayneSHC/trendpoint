@@ -52,6 +52,15 @@ class DataConfig(BaseModel):
         default_factory=FuturesDataSourceConfig,
         description="期貨真實資料源參數（spec 010）；預設齊全，既有 config 零改可載"
     )
+    equity_history_period: str = Field(
+        default="max",
+        description=(
+            "現貨日線的 yfinance 取數期間（'max' / '10y' / '5y' …）。"
+            "預設 max：B 段實測顯示 10y 下各標的僅 6~14 筆交易，遠低於統計推論所需的 30 筆。"
+            "注意 max 會納入 1990 年代台股（漲跌幅限制、成本結構、參與者結構皆不同），"
+            "樣本量與同質性是取捨——縮短期間請改此參數，勿在 adapter 內硬編碼。"
+        )
+    )
     tickers: List[str] = Field(
         default_factory=lambda: ["2330.TW", "0050.TW"],
         description="系統支援追蹤的證券/標代號清單（純字串→equity/yfinance instrument）"

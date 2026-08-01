@@ -18,6 +18,7 @@ import pytest
 
 import run_b_segment as bs
 from config.config import SystemConfig
+from monte_carlo import bootstrap_trades
 from instruments import AssetClass, ContractSpec, Instrument, equity_instrument
 
 from bos_volume_fixtures import daily_klines, futures_daily_klines
@@ -130,14 +131,42 @@ def test_calibration_reports_unavailable_without_trades():
     assert out["available"] is False
 
 
-def test_calibration_returns_positive_threshold_from_p95():
-    """p95 回撤為負值，門檻取其絕對值。"""
+def test_calibration_returns_positive_threshold_from_the_drawdown_tail():
+    """回撤為負值，門檻取其絕對值。"""
     returns = [0.05, -0.03, 0.02, -0.08, 0.01, -0.02] * 10
     out = bs.calibrate_dd_limit({"trade_returns": returns}, n_sims=500)
     assert out["available"] is True
-    assert out["p95_max_drawdown"] <= 0.0
-    assert out["suggested_dd_limit_pct"] == abs(out["p95_max_drawdown"])
+    assert out["deep_max_drawdown"] <= 0.0
+    assert out["suggested_dd_limit_pct"] == abs(out["deep_max_drawdown"])
     assert 0.0 < out["suggested_dd_limit_pct"] < 1.0
+
+
+def test_calibration_takes_the_deep_tail_not_the_shallow_one():
+    """門檻必須取回撤分布的**深尾**（帶號分布第 5 百分位）。
+
+    這條釘的是一個真的犯過、而且通過了 CI 的錯：`bootstrap_trades` 的
+    `max_drawdown` 是**帶號負值**，所以「回撤幅度的第 95 百分位」對應到
+    帶號分布的**第 5** 百分位。初版取了 95，於是每檔標的都校準出 0.00%
+    的門檻——形同閘門永不觸發，而報表看起來一切正常。
+
+    舊測試用的是虧損偏多的序列，兩端都明顯為負，取錯端也照樣通過。
+    這裡改用**虧損稀有**的序列才有鑑別力：48 抽 1 的虧損率下，約 36%
+    的重抽路徑一次都沒抽中虧損，其回撤恰為 0，淺尾因此被釘在 0；
+    深尾則是連續抽中虧損的路徑，明顯為負。兩端不可能混淆。
+
+    虧損稀有正是真實資料的樣貌——B 段首跑各標的僅 6~7 筆交易、
+    勝率 67~100%，淺尾自然是 0.00%。
+    """
+    returns = [0.03] * 47 + [-0.15]
+    out = bs.calibrate_dd_limit({"trade_returns": returns}, n_sims=2000)
+    mc = bootstrap_trades(returns, n_sims=2000, seed=42)
+
+    assert out["deep_max_drawdown"] == mc["max_drawdown"][5]
+    assert out["suggested_dd_limit_pct"] == abs(mc["max_drawdown"][5])
+
+    # 鑑別力：淺尾在此分布下趨近 0，取錯端會得到不可用的門檻
+    assert abs(mc["max_drawdown"][95]) < 0.01, "淺尾不夠接近 0，此 fixture 失去鑑別力"
+    assert out["suggested_dd_limit_pct"] > 0.02
 
 
 def test_calibration_warns_on_small_sample():
@@ -155,10 +184,10 @@ def test_report_uses_different_yardsticks(capsys, cfg):
         {"label": "基準（三項皆關閉）", "kind": "baseline", "skipped": False, "total_return": 0.10,
          "max_drawdown": -0.10, "calmar": 1.0, "sharpe": 0.8, "total_trades": 40,
          "win_rate": 0.5, "profit_factor": 1.5, "expectancy": 0.003},
-        # 風控：報酬下降但 MDD 改善 → 應判為改善
+        # 風控：報酬下降但 MDD 改善 → 應判為改善（閘門確實有封鎖，故判定成立）
         {"label": "啟用回撤閘門", "kind": "risk", "skipped": False, "total_return": 0.04,
          "max_drawdown": -0.05, "calmar": 1.4, "sharpe": 0.9, "total_trades": 25,
-         "win_rate": 0.52, "profit_factor": 1.6, "expectancy": 0.002},
+         "win_rate": 0.52, "profit_factor": 1.6, "expectancy": 0.002, "blocked_bars": 31},
         # 訊號濾網：交易數下降且期望值未改善
         {"label": "啟用 BOS 量能確認", "kind": "signal", "skipped": False, "total_return": 0.06,
          "max_drawdown": -0.11, "calmar": 0.9, "sharpe": 0.7, "total_trades": 18,
@@ -173,10 +202,61 @@ def test_report_uses_different_yardsticks(capsys, cfg):
     assert "run_walk_forward" in out, "必須提醒單次對照不足以支撐採用決定"
 
 
+def test_untriggered_gate_reports_no_data_not_no_improvement(capsys):
+    """閘門一根都沒封鎖時，必須說「未觸發」而非「未改善」。
+
+    這條守的是一個實際發生過、而且比計算錯誤更危險的判讀缺陷：閘門未觸發時
+    所有指標差必然為 0，舊版報表據此印出「風險調整後未改善」——把**沒有證據**
+    呈現成**有證據說沒用**。這兩者在「是否改為預設啟用」的決策上完全相反。
+
+    真實情境並不罕見：SC-015 以重抽分布深尾校準的門檻（實測 8.9%~17.6%）
+    按定義就比單一歷史路徑的 MDD（實測 5.4%~8.7%）深，故在對照中極少觸發。
+    """
+    rows = [
+        {"label": "基準（三項皆關閉）", "kind": "baseline", "skipped": False, "total_return": 0.10,
+         "max_drawdown": -0.10, "calmar": 1.0, "sharpe": 0.8, "total_trades": 40,
+         "win_rate": 0.5, "profit_factor": 1.5, "expectancy": 0.003},
+        # 逐欄與基準相同 + 封鎖 0 根 = 閘門從未啟動
+        {"label": "啟用回撤閘門", "kind": "risk", "skipped": False, "total_return": 0.10,
+         "max_drawdown": -0.10, "calmar": 1.0, "sharpe": 0.8, "total_trades": 40,
+         "win_rate": 0.5, "profit_factor": 1.5, "expectancy": 0.003, "blocked_bars": 0},
+    ]
+    bs.print_report("TEST", EQUITY, {"available": False, "reason": "測試"}, rows)
+    out = capsys.readouterr().out
+
+    assert "未觸發" in out and "無對照數據" in out
+    assert "未改善" not in out, "未觸發被誤報為未改善——這會導向相反的決策"
+    assert "不得據此判定" in out
+
+
+def test_blocked_bars_counts_only_blocked_rows():
+    """`block_reason` 非空的根數即封鎖數；欄位不存在（閘門未啟用）時為 0。"""
+    with_gate = {"equity_curve": [
+        {"equity": 1.0, "block_reason": ""},
+        {"equity": 1.0, "block_reason": "drawdown"},
+        {"equity": 1.0, "block_reason": "settlement"},
+        {"equity": 1.0, "block_reason": "drawdown+settlement"},
+    ]}
+    assert bs._blocked_bars(with_gate) == 3
+
+    # 條件輸出欄：閘門未啟用時 equity_curve 根本沒有 block_reason
+    assert bs._blocked_bars({"equity_curve": [{"equity": 1.0}, {"equity": 1.0}]}) == 0
+    assert bs._blocked_bars({}) == 0
+
+
+def test_run_scenarios_reports_blocked_bars(cfg):
+    """實跑產生的列必須帶 blocked_bars，否則報表無從區分未觸發與未改善。"""
+    rows = bs.run_scenarios(daily_klines(400), EQUITY, cfg, dd_limit_pct=0.02)
+    gate = next(r for r in rows if r["label"] == "啟用回撤閘門")
+    assert "blocked_bars" in gate
+    # 門檻收到 2% 時閘門必然觸發，否則這條測試永遠為綠
+    assert gate["blocked_bars"] > 0
+
+
 def test_report_flags_small_sample_calibration(capsys):
     bs.print_report("TEST", EQUITY,
                     {"available": True, "n_source_trades": 5,
-                     "p95_max_drawdown": -0.12, "suggested_dd_limit_pct": 0.12,
+                     "deep_max_drawdown": -0.12, "suggested_dd_limit_pct": 0.12,
                      "warning": "交易樣本僅 5 筆 (<30)，任何統計推論都不可靠。"},
                     [])
     out = capsys.readouterr().out
@@ -216,7 +296,8 @@ def test_combined_scenario_refuses_to_attribute(capsys):
          "total_trades": 40, "win_rate": 0.5, "profit_factor": 1.5, "expectancy": 0.003},
         {"label": "三項全開", "kind": "combined", "skipped": False,
          "total_return": 0.05, "max_drawdown": -0.06, "calmar": 1.3, "sharpe": 0.9,
-         "total_trades": 15, "win_rate": 0.6, "profit_factor": 1.8, "expectancy": 0.004},
+         "total_trades": 15, "win_rate": 0.6, "profit_factor": 1.8, "expectancy": 0.004,
+         "blocked_bars": 12},
     ]
     bs.print_report("TEST", EQUITY, {"available": False, "reason": "測試"}, rows)
     out = capsys.readouterr().out

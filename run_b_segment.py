@@ -11,7 +11,8 @@ spec 012 / 013 的驗收都切成兩段：A 段離線可完成（合成資料即
 
 對應驗收條目：
 
-    spec 013 SC-015  以 monte_carlo 的 p95 回撤校準 dd_limit_pct
+    spec 013 SC-015  以 monte_carlo 的回撤分布深尾校準 dd_limit_pct
+                     （spec 稱「p95 回撤」＝**幅度**的 p95；帶號分布下取第 5 百分位）
     spec 013 SC-014  回撤閘門／結算日閘門的啟用前後對照
     spec 012 SC-010  BOS 量能確認的啟用前後對照
 
@@ -152,27 +153,57 @@ def evaluate(df: pd.DataFrame,
         "expectancy": _expectancy(s),
         "trade_returns": s.get("trade_returns", []),
         "blown_up": s.get("blown_up", False),
+        "blocked_bars": _blocked_bars(res),
     }
 
 
+def _blocked_bars(res: Dict[str, Any]) -> int:
+    """閘門實際封鎖的根數。
+
+    這是區分「未改善」與**「未測到」**的唯一依據——兩者的指標差全是 0，
+    但在決策上完全相反：前者是「有證據說沒用」，後者是「沒有證據」。
+
+    `block_reason` 是條件輸出欄（僅任一閘門啟用時存在，見 backtester.py），
+    故欄位不存在＝閘門未啟用，回傳 0。
+    """
+    curve = res.get("equity_curve")
+    if curve is None or len(curve) == 0:
+        return 0
+    df = pd.DataFrame(curve) if not isinstance(curve, pd.DataFrame) else curve
+    if "block_reason" not in df.columns:
+        return 0
+    return int((df["block_reason"].astype(str) != "").sum())
+
+
 def calibrate_dd_limit(baseline: Dict[str, Any], n_sims: int = 5000) -> Dict[str, Any]:
-    """spec 013 SC-015：自基準的逐筆報酬重抽，取 p95 回撤作為門檻參考起點。
+    """spec 013 SC-015：自基準的逐筆報酬重抽，取回撤分布的**深尾**作為門檻參考起點。
 
     重點在於「分布」而非歷史單一路徑——歷史 MDD 只是眾多可能路徑中的一條，
     拿它當風險預算會系統性低估。回傳含 warning 時代表樣本數不足，
     **該數字不可用於定案**。
+
+    ## 取哪一端（踩過的坑）
+
+    spec 一路寫「p95 回撤」，指的是**回撤幅度**的第 95 百分位，也就是「二十次
+    裡最壞的那一次」。但 `bootstrap_trades` 回傳的 `max_drawdown` 是**帶號的
+    負值**，於是幅度的 p95 對應到帶號分布的**第 5 百分位**——
+    `np.percentile(mdds, 95)` 取到的反而是最淺的那一側。
+
+    本函式初版就是取了 95，結果每檔標的都校準出 0.00% 的門檻（帶號分布的
+    上緣多半是「完全沒有回撤」的幸運路徑）。`monte_carlo.format_monte_carlo_report`
+    早已寫明正確慣例：「風險預算應以回撤分布的 5 百分位（最深一側）為準」。
     """
     mc = bootstrap_trades(baseline.get("trade_returns") or [], n_sims=n_sims, seed=42)
     if mc.get("n_source_trades", 0) == 0:
         return {"available": False, "reason": mc.get("warning", "無交易紀錄")}
 
-    p95_mdd = mc["max_drawdown"][95]
+    deep_mdd = mc["max_drawdown"][5]
     return {
         "available": True,
         "n_source_trades": mc["n_source_trades"],
-        "p95_max_drawdown": p95_mdd,
-        # 門檻取回撤幅度的絕對值；p95 代表「二十次裡最壞的那一次」
-        "suggested_dd_limit_pct": abs(p95_mdd),
+        "deep_max_drawdown": deep_mdd,
+        # 門檻取回撤幅度的絕對值
+        "suggested_dd_limit_pct": abs(deep_mdd),
         "warning": mc.get("warning"),
     }
 
@@ -220,9 +251,10 @@ def print_report(ticker: str, instrument, calibration: Dict[str, Any],
         print(f"  無法校準：{calibration.get('reason')}")
     else:
         print(f"  基準交易筆數      : {calibration['n_source_trades']}")
-        print(f"  p95 最大回撤      : {calibration['p95_max_drawdown']:.2%}")
+        print(f"  回撤分布深尾      : {calibration['deep_max_drawdown']:.2%}"
+              f"（帶號分布第 5 百分位 = 幅度第 95 百分位）")
         print(f"  建議 dd_limit_pct : {calibration['suggested_dd_limit_pct']:.4f}"
-              f"（= |p95 回撤|，僅為參考起點）")
+              f"（= |深尾回撤|，僅為參考起點）")
         if calibration.get("warning"):
             print(f"  ⚠ {calibration['warning']}")
             print("  ⚠ 樣本數不足時本數字不可用於定案——那不是蒙地卡羅能補救的問題。")
@@ -257,14 +289,23 @@ def print_report(ticker: str, instrument, calibration: Dict[str, Any],
 
         signal_line = (f"期望值 {d_exp:+.3%}、PF {d_pf:+.2f}、交易數 {d_trd:+d} → "
                        f"{'期望值改善' if d_exp > 0 else '期望值未改善'}")
-        risk_line = (f"MDD {d_mdd:+.2%}、Calmar {d_cal:+.2f}、交易數 {d_trd:+d} → "
-                     f"{'風險調整後改善' if (d_mdd > 0 or d_cal > 0) else '風險調整後未改善'}")
+
+        # 閘門一根都沒封鎖時，各項指標差必然全為 0——那是**未測到**，不是未改善。
+        # 把「沒有證據」印成「有證據說沒用」會直接導向相反的決策，故此處不給判定。
+        blocked = int(r.get("blocked_bars", 0))
+        if blocked == 0:
+            risk_line = ("封鎖 0 根 → **未觸發，無對照數據**"
+                         "（本門檻下閘門從未啟動，不得據此判定有效或無效）")
+        else:
+            risk_line = (f"封鎖 {blocked} 根、MDD {d_mdd:+.2%}、Calmar {d_cal:+.2f}、"
+                         f"交易數 {d_trd:+d} → "
+                         f"{'風險調整後改善' if (d_mdd > 0 or d_cal > 0) else '風險調整後未改善'}")
 
         if kind == "signal":
             print(f"  [訊號濾網] {r['label']}：{signal_line}（總報酬 {d_ret:+.2%} 僅供參考）")
         elif kind == "risk":
-            print(f"  [風控閘門] {r['label']}：{risk_line}"
-                  f"（總報酬 {d_ret:+.2%} **不作為判準**）")
+            tail = "" if blocked == 0 else f"（總報酬 {d_ret:+.2%} **不作為判準**）"
+            print(f"  [風控閘門] {r['label']}：{risk_line}{tail}")
         else:
             # 混合情境：兩把尺都要看，且**不給單一結論**——訊號濾網與風控閘門
             # 的效果在此疊加，任一指標的變化都無法歸因到特定機制。

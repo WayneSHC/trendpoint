@@ -112,3 +112,33 @@ def test_shipped_config_yaml_keeps_gates_off():
     cfg = load_config()
     assert cfg.strategy.default.use_dd_gate is False
     assert cfg.strategy.default.use_settlement_gate is False
+
+
+def test_equity_history_period_is_config_driven_not_hardcoded():
+    """憲章 V：現貨取數期間屬可調參數，只能來自 config。
+
+    這條同時是回歸測試：`yfinance_source` 曾把 `("10y", "1d")` 硬編碼在模組層，
+    導致「拉長回測期間」這個最基本的研究動作必須改程式碼。
+    """
+    from data_sources.yfinance_source import YfinanceAdapter
+
+    assert SystemConfig().data.equity_history_period == "max"
+    assert load_config().data.equity_history_period == "max"
+
+    class _Stub:
+        equity_history_period = "5y"
+
+    assert YfinanceAdapter(cfg=_Stub())._period_for("daily") == "5y"
+
+
+def test_five_minute_period_is_not_config_driven():
+    """5 分線固定 5 天——那是 yfinance 對 5m 的供給上限，不是策略參數。
+
+    若它跟著 `equity_history_period` 走，設成 max 會直接讓 5m 取數失敗。
+    """
+    from data_sources.yfinance_source import YfinanceAdapter
+
+    class _Stub:
+        equity_history_period = "max"
+
+    assert YfinanceAdapter(cfg=_Stub())._period_for("5m") == "5d"

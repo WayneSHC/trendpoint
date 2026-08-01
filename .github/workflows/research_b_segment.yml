@@ -67,6 +67,35 @@ jobs:
             python run_ingestion.py --equity-only
           fi
 
+      # 輸入指紋：**沒有它，B 段的數字不可重現也無法稽核。**
+      #
+      # 實測發現（run 30705889130 vs 30706143694，同一 commit）：yfinance 對
+      # 相同標的、相同期間、相同筆數會回傳**數值不同**的資料——`auto_adjust=True`
+      # 的還原價取決於 Yahoo 當下回傳的股利/分割歷史，而那會浮動。後果是
+      # walk-forward 對同一組參數、同一個訓練窗算出不同的 Calmar
+      # （00878.TW Fold 1：1.82 / 2.10 / 1.82），00878 Fold 2 的交易數
+      # 甚至從 3 變 4。五檔中 0050／00919／00631L 穩定，2330／00878 會飄。
+      #
+      # 程式碼本身是決定性的（optimizer 為固定清單網格搜尋、`>` 嚴格比較先到先贏，
+      # optimizer.py 與 walk_forward.py 皆無 RNG 或平行化），所以差異只可能來自輸入。
+      # 指紋讓「這批數字對應哪份資料」成為 artifact 的一部分：日後兩份報告對不起來時，
+      # 先比指紋就能區分「策略改了」與「資料變了」。
+      - name: 記錄輸入資料指紋
+        run: |
+          mkdir -p artifacts
+          {
+            echo "# B 段輸入資料指紋"
+            echo "# run_id=${{ github.run_id }}  sha=${{ github.sha }}  utc=$(date -u +%FT%TZ)"
+            echo "# 欄位：sha256  行數  檔案"
+            for f in "data"/*.csv; do
+              [ -e "$f" ] || continue
+              printf '%s  %s  %s\n' \
+                "$(sha256sum "$f" | cut -d' ' -f1)" \
+                "$(wc -l < "$f")" \
+                "$f"
+            done
+          } | tee artifacts/data_fingerprint.txt
+
       # tee 到檔案：終端輸出會隨 log 保留期限消失，artifact 才是可引用的產物。
       # 經 env 傳遞輸入而非插值進指令字串（沿用 alert_scheduler.yml 的既有慣例）。
       - name: 執行 B 段實測
