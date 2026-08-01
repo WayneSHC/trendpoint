@@ -98,6 +98,29 @@ def calculate_three_bands(yesterday_high: float, yesterday_low: float) -> Tuple[
     lower_price = yesterday_high - diff * 1.382
     return upper_price, mid_price, lower_price
 
+def calculate_volume_confirmation(df: pd.DataFrame,
+                                  period: int = 20,
+                                  mult: float = 1.5) -> pd.Series:
+    """
+    量能確認（spec 012）：判定根的成交量是否放大至前 period 根均量的 mult 倍以上。
+
+    契約見 specs/012-bos-volume-confirmation/contracts/bos-volume-filter.md §1。
+
+    `.shift(1)` 不可省（憲章原則 I）：均量必須只用**判定根之前**的 K 線。
+    判定根自身的量可用——它在該根收盤時已完整。若把自身量算進均量，門檻會被
+    自己推高，形成「量越大越難通過」的反向依賴。
+
+    `notna() & (vol_ma > 0)` 為顯式判定，**不依賴**「與 NaN 比較恰好為 False」
+    的隱性行為（同 check_entry_signal 對 ATR 暖機期的既有明文教訓）。
+    vol_ma <= 0 時回傳 False——零均量無從判定「放大」，不得退化為一律通過。
+
+    回傳 Series[bool]（無 NaN），不就地修改 df。
+    """
+    vol_ma = df['volume'].rolling(period).mean().shift(1)
+    ok = vol_ma.notna() & (vol_ma > 0) & (df['volume'] > vol_ma * mult)
+    return ok.fillna(False).astype(bool)
+
+
 def calculate_vwap(df: pd.DataFrame) -> pd.Series:
     """
     計算當日成交量加權平均價 (Volume Weighted Average Price, VWAP)
@@ -495,7 +518,10 @@ def build_indicator_frame(df: pd.DataFrame,
                           use_fvg: bool = False,
                           fvg_lookback: int = 3,
                           swing_n: int = 2,
-                          volume_mult: float = 1.5) -> pd.DataFrame:
+                          volume_mult: float = 1.5,
+                          use_bos_volume: bool = False,
+                          bos_volume_mult: float = 1.5,
+                          bos_volume_period: int = 20) -> pd.DataFrame:
     """
     正典指標組裝入口（spec 004，契約見 specs/004-acceptance-tests/contracts/）。
     回測引擎與即時監控共用此函式，消除兩端各自內聯的重複邏輯。
@@ -508,6 +534,10 @@ def build_indicator_frame(df: pd.DataFrame,
     include_regime=False 時省略 regime_ok 欄位（監控端不需市況濾網）。
     use_fvg 預設 False（baseline-preserving）：不帶此參數的既有呼叫（含 004 parity）
     行為不變；呼叫端須顯式 use_fvg=True 才啟用 spec 002 的 FVG 確認。
+    use_bos_volume 預設 False（spec 012，同一 baseline-preserving 模式）：
+    True 時多輸出 bos_volume_ok 一欄，關閉時**不輸出**該欄——比照 include_regime。
+    該欄供**續勢（BOS）進場**的第五道確認使用；它**不進入 detect_market_structure**，
+    故 bos_signal / mss_signal 在兩種設定下逐值相同（FR-004）。
     回傳新 DataFrame，不就地修改輸入。
     """
     out = df.copy()
@@ -531,6 +561,15 @@ def build_indicator_frame(df: pd.DataFrame,
                                        swing_n=swing_n, volume_mult=volume_mult)
     out['mss_signal'] = mss
     out['bos_signal'] = bos
+
+    # 量能確認（spec 012）：**進場判定層**的第五道確認，不是訊號層的一部分。
+    # 刻意在 detect_market_structure 之後、且不傳入它——若在訊號層抑制 BOS，
+    # 反轉訊號的 `~bos` 互斥條件會讓原本被排除的 MSS 在同一根成立，
+    # 等於用一道量能濾網改寫了訊號定義（research.md D1）。
+    if use_bos_volume:
+        out['bos_volume_ok'] = calculate_volume_confirmation(
+            out, period=bos_volume_period, mult=bos_volume_mult)
+
     out['ladder'] = calculate_ladder_levels(out, out['atr'], k=ladder_k)
 
     # 吊燈止損線
@@ -606,17 +645,25 @@ class PositionManager:
                            global_filter_ok: bool,
                            is_daily: bool = False,
                            disabled_filters: frozenset = frozenset(),
-                           direction: int = 1) -> bool:
+                           direction: int = 1,
+                           volume_ok: bool = True) -> bool:
         """
-        多重確認進場邏輯 (4 維度確認)
+        多重確認進場邏輯 (4 維度確認 + spec 012 的量能確認)
 
-        disabled_filters 可包含 'structure' / 'momentum' / 'trend' / 'volatility' / 'global'，
-        被列入的維度將直接視為通過。此參數供消融測試 (Ablation Test) 逐一評估
-        每道濾網對期望值的真實貢獻，避免堆疊「看起來嚴謹」但只會扼殺交易次數的濾網。
+        disabled_filters 可包含 'structure' / 'momentum' / 'trend' / 'volatility' /
+        'global' / 'bos_volume'，被列入的維度將直接視為通過。此參數供消融測試
+        (Ablation Test) 逐一評估每道濾網對期望值的真實貢獻，避免堆疊
+        「看起來嚴謹」但只會扼殺交易次數的濾網。
 
         direction（spec 003）：1 = 多方（預設，行為與 003 前逐字相同）；
         -1 = 空方鏡像——結構端看跌(-1)、動能端收陰線、趨勢端價低於當日開盤（與 VWAP）。
         波動端（振幅）與全域濾網無方向、兩側同式。
+
+        volume_ok（spec 012）：量能確認的判定值，**僅由續勢（BOS）分支傳入**；
+        反轉（MSS）分支不傳（預設 True）——反轉路徑已內建自己的位移量能確認
+        （detect_market_structure 的 volume_mult），再套一次即為雙重套用。
+        預設 True 使既有 14 個呼叫點零改動、回傳值逐字不變（FR-002）。
+        本維度**無方向性**：多空兩側同參數、同語意。
         """
         if direction == 1:
             # 1. 結構端: MSS 或 BOS 方向確認 (1 代表看漲，-1 代表看跌，0 代表無訊號)
@@ -651,7 +698,11 @@ class PositionManager:
         # 綜合全域濾網 (例如三關價判定與市況濾網)
         global_ok = global_filter_ok or ('global' in disabled_filters)
 
-        return structure_ok and momentum_ok and trend_ok and volatility_ok and global_ok
+        # 5. 量能端（spec 012）：續勢進場的量能放大確認；不傳時預設通過
+        volume_conf_ok = volume_ok or ('bos_volume' in disabled_filters)
+
+        return (structure_ok and momentum_ok and trend_ok and volatility_ok
+                and global_ok and volume_conf_ok)
 
     def manage_position(self,
                         current_close: float,

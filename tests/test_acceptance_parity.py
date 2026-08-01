@@ -51,7 +51,21 @@ _PARAM_VARIANTS = [
         dict(structure_period=10, include_regime=False, use_fvg=True, fvg_lookback=3),
         id="fvg_on",
     ),
+    # spec 012：量能確認欄亦須全因果（均量已 .shift(1)）。刻意另立變體而非
+    # 併入既有兩組——bos_volume_ok 只在啟用時存在，硬塞進預設組會讓它因缺欄而失敗。
+    pytest.param(
+        dict(structure_period=10, include_regime=False,
+             use_bos_volume=True, bos_volume_mult=1.5, bos_volume_period=20),
+        id="bos_volume_on",
+    ),
 ]
+
+
+def _columns_for(params: dict) -> list:
+    """該參數組應驗證的欄位集：僅在啟用時納入 bos_volume_ok（spec 012 T021）。"""
+    if params.get("use_bos_volume"):
+        return PARITY_COLUMNS + ["bos_volume_ok"]
+    return PARITY_COLUMNS
 
 
 def _truncation_points(n: int, cadence: int | None) -> list[int]:
@@ -97,7 +111,7 @@ def test_prefix_consistency(n, freq, cadence, params):
     for i in points:
         prefix = build_indicator_frame(df.iloc[:i], **params)
         assert len(prefix) == i
-        for col in PARITY_COLUMNS:
+        for col in _columns_for(params):
             pd.testing.assert_series_equal(
                 prefix[col].reset_index(drop=True),
                 full[col].iloc[:i].reset_index(drop=True),
@@ -126,7 +140,7 @@ def test_incremental_replay_exhaustive(params):
     for j in range(1, n):  # j = 當前「最新已收盤」bar 的位置
         last_row = build_indicator_frame(df.iloc[: j + 1], **params).iloc[-1]
         full_row = full.iloc[j]
-        for col in PARITY_COLUMNS:
+        for col in _columns_for(params):
             a, b = last_row[col], full_row[col]
             if pd.isna(a) and pd.isna(b):
                 continue

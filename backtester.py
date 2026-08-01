@@ -111,6 +111,9 @@ class BacktestEngine:
                      sizer = None,
                      point_value: float = 1.0,
                      enable_short: bool = False,
+                     use_bos_volume: bool = False,
+                     bos_volume_mult: float = 1.5,
+                     bos_volume_period: int = 20,
                      use_dd_gate: bool = False,
                      dd_limit_pct: float = 0.20,
                      dd_resume_pct: float = 0.10,
@@ -143,6 +146,9 @@ class BacktestEngine:
             point_value (float): 每點價值（現股 1.0；期貨 = 契約乘數，P&L = units×Δ價×此值）
             enable_short (bool): 期貨做空開關（spec 003）；僅 asset_class="futures" 時生效
                 ——現貨結構上不存在空方路徑（任何旗標組合下 equity 零空單）
+            use_bos_volume (bool): 啟用 BOS 續勢進場的量能確認（spec 012）；預設關閉、逐筆不變
+            bos_volume_mult (float): 量能放大倍數門檻（成交量 > 均量 × 此值）
+            bos_volume_period (int): 均量回看根數
             use_dd_gate (bool): 啟用回撤閘門（spec 013）；預設關閉，關閉時逐筆逐根位元不變
             dd_limit_pct (float): 回撤達此幅度停止開新倉（正數表幅度）
             dd_resume_pct (float): 回撤回升至此幅度以內解除封鎖；須嚴格小於 dd_limit_pct
@@ -214,13 +220,19 @@ class BacktestEngine:
             use_fvg=effective_use_fvg,
             fvg_lookback=fvg_lookback,
             swing_n=swing_n,
-            volume_mult=volume_mult
+            volume_mult=volume_mult,
+            use_bos_volume=use_bos_volume,
+            bos_volume_mult=bos_volume_mult,
+            bos_volume_period=bos_volume_period
         )
         # 消融測試停用 regime 時，保持原語意：濾網欄位存在且恆為 True
         if 'regime_ok' not in temp_df.columns:
             temp_df['regime_ok'] = True
         if 'regime_ok_short' not in temp_df.columns:
             temp_df['regime_ok_short'] = True
+        # spec 012：濾網關閉時不輸出該欄，補為恆 True（同 regime_ok 的既有慣例）
+        if 'bos_volume_ok' not in temp_df.columns:
+            temp_df['bos_volume_ok'] = True
 
         # 1b. 進場閘門（spec 013）：路徑相依風控，**只擋開新倉，不碰任何出場路徑**。
         # 消融語意與既有濾網一致：鍵出現在 disabled_filters 時該閘門視為恆開。
@@ -319,9 +331,12 @@ class BacktestEngine:
                         is_daily=is_daily,
                     )
                     # (1) BOS 續勢進場：全維度濾網（語意同 007 前）
+                    # spec 012：量能確認**只**接在續勢分支；取 sig_row（判定根）
+                    # 而非 struct_row（iloc[i-2]，會比其餘四道確認多一根延遲）
                     if bos_sig == 1:
                         is_entry = pm.check_entry_signal(
-                            structure_sig=1, disabled_filters=disabled_filters, **common
+                            structure_sig=1, disabled_filters=disabled_filters,
+                            volume_ok=bool(sig_row['bos_volume_ok']), **common
                         )
                     # (2) MSS 反轉進場（長側）：放寬順勢確認(trend)與 200MA regime，
                     #     但**保留三關價**（close>mid_price，spec 003 強調的空頭防線）——
@@ -349,6 +364,7 @@ class BacktestEngine:
                         short_entry = pm.check_entry_signal(
                             structure_sig=-1, direction=-1,
                             disabled_filters=disabled_filters,
+                            volume_ok=bool(sig_row['bos_volume_ok']),   # spec 012：多空同式
                             **{**common, 'global_filter_ok': short_global_ok}
                         )
                     # (2) 看跌 MSS 反轉（spec 007 短腿解封）：鏡像多方反轉 profile——

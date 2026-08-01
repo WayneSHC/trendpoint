@@ -171,6 +171,26 @@ class SingleStrategyParams(BaseModel):
                     "現貨結構上不存在空方路徑（引擎閘門保證）；對現貨 ticker 的 override "
                     "明設 True 會於組態載入時 fail-fast"
     )
+    # ---- BOS 量能確認（spec 012）：預設關閉，關閉時回測行為逐筆不變 ----
+    use_bos_volume: bool = Field(
+        default=False,
+        description="啟用 BOS 續勢進場的量能確認（spec 012）：判定根成交量須放大至"
+                    "前 bos_volume_period 根均量的 bos_volume_mult 倍以上。"
+                    "**僅作用於續勢分支**，MSS 反轉分支已內建自己的位移量能確認"
+    )
+    bos_volume_mult: float = Field(
+        default=1.5,
+        gt=0.0,
+        description="BOS 量能確認的放大倍數門檻（成交量 > 均量 × 此值，嚴格大於）。"
+                    "與 MSS 位移確認的 mss_volume_mult 獨立——兩者作用於不同路徑"
+    )
+    bos_volume_period: int = Field(
+        default=20,
+        ge=2,
+        description="BOS 量能確認的均量回看根數。刻意不綁定 structure_period："
+                    "後者是結構樞紐的回看窗，與「均量該取多長」無先驗關聯"
+                    "（spec 012 research.md D4）"
+    )
     # ---- 進場閘門（spec 013）：兩道皆預設關閉，關閉時回測行為逐筆逐根不變 ----
     use_dd_gate: bool = Field(
         default=False,

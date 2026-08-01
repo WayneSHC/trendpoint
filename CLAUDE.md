@@ -95,8 +95,12 @@ python monitor_signals.py --once   # 單次訊號檢測與推播
   `specs/013-entry-gate-risk-limits`）**A 段已實作**——兩道閘門**預設關閉**，
   關閉時逐筆、逐根、逐欄與實作前相同（基準凍結於 `tests/fixtures/013_baseline_*`）；
   是否改為預設啟用需 B 段真實資料實測（SC-014/015），未完成前**不得**宣稱本案
-  「降低了回撤」。`012`（BOS 量能確認）規格與計畫齊備、**尚未實作**
-  （驗收需真實資料，見其 tasks.md 的 A/B 段標示）；
+  「降低了回撤」。`012`（BOS 續勢進場的量能確認，`specs/012-bos-volume-confirmation`）
+  **A 段已實作**——`ladder_system.calculate_volume_confirmation` 純函式 +
+  `bos_volume_ok` 條件輸出欄，**預設關閉**。作用於**進場判定層**而非訊號層
+  （訊號層抑制 BOS 會讓 `~bos` 互斥條件放行原本被排除的 MSS，等於改寫訊號定義）；
+  **只接續勢分支**，MSS 反轉分支不傳（該路徑已內建自己的位移量能確認，
+  再套一次即雙重套用）。是否改為預設啟用需 B 段實測（SC-010）；
   `004~006` 見各 spec.md 狀態。新功能走 Spec Kit：
   `/speckit-specify` → `/speckit-plan` → `/speckit-tasks` → `/speckit-implement`
 - 理論：`three_bands_theory.md`、`docs/ladder-optimization-research.md`（階梯優化研究，

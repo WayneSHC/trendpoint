@@ -38,4 +38,5 @@ jobs:
         run: |
           pip uninstall -y numba
           pytest -q tests/test_ladder_system.py tests/test_lookahead_bias.py tests/test_acceptance_parity.py \
-                    tests/test_entry_gate_integration.py tests/test_risk_gates.py
+                    tests/test_entry_gate_integration.py tests/test_risk_gates.py \
+                    tests/test_bos_volume_confirmation.py
