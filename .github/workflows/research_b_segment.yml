@@ -1,0 +1,103 @@
+name: TrendPoint - B 段實測（手動觸發）
+
+# spec 012 / 013 的驗收切成兩段：A 段離線可完成（合成資料即足，已隨 CI 常態跑），
+# B 段需要**真實市場資料**才能回答「這功能到底有沒有用」。本工作流程即 B 段的
+# 執行環境——行情來源在 GitHub runner 上可達，`alert_scheduler.yml` 每 30 分鐘
+# 實抓 yfinance 已長期證實這一點。
+#
+# 產出以 artifact 形式保留（報告 + trendpoint.db + CSV 快取），供人工判讀與回填。
+# **本工作流程不會改動任何組態**：run_b_segment.py 的覆寫全在記憶體內完成。
+
+on:
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: '資料範圍：equity=只灌現貨（快）；full=含期貨 TAIFEX 回填（首次約 11 分鐘）'
+        type: choice
+        options: [equity, full]
+        default: equity
+      ticker:
+        description: '只跑指定標的（留空 = 設定檔全部）'
+        type: string
+        default: ''
+      sims:
+        description: '蒙地卡羅重抽次數（SC-015 門檻校準用）'
+        type: string
+        default: '5000'
+
+jobs:
+  b-segment:
+    runs-on: ubuntu-latest
+    # 首次 TAIFEX 回填自 1998 年起、逐月批次、每請求節流 2 秒（約 341 請求 ≈ 11 分鐘），
+    # 之後走增量。留足餘裕但遠低於 6 小時上限。
+    timeout-minutes: 90
+
+    steps:
+      - name: 檢出專案程式碼
+        uses: actions/checkout@v5
+
+      - name: 設定 Python 環境
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: 安裝相依套件
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # 刻意與 alert_scheduler.yml 的 `trendpoint-db-` 分開命名空間：
+      # 本流程的 DB 是研究產物（含期貨全歷史），不應與排程監控的輕量 DB 互相覆蓋。
+      - name: 還原研究用 SQLite 快取
+        uses: actions/cache@v5
+        with:
+          path: trendpoint.db
+          key: trendpoint-research-db-${{ github.run_id }}
+          restore-keys: |
+            trendpoint-research-db-
+
+      - name: 匯入市場資料
+        env:
+          SCOPE: ${{ inputs.scope }}
+        run: |
+          if [ "$SCOPE" = "full" ]; then
+            python run_ingestion.py
+          else
+            python run_ingestion.py --equity-only
+          fi
+
+      # tee 到檔案：終端輸出會隨 log 保留期限消失，artifact 才是可引用的產物。
+      # 經 env 傳遞輸入而非插值進指令字串（沿用 alert_scheduler.yml 的既有慣例）。
+      - name: 執行 B 段實測
+        env:
+          TICKER: ${{ inputs.ticker }}
+          SIMS: ${{ inputs.sims }}
+        run: |
+          mkdir -p artifacts
+          if [ -n "$TICKER" ]; then
+            python run_b_segment.py "$TICKER" --sims "$SIMS" 2>&1 | tee artifacts/b_segment_report.txt
+          else
+            python run_b_segment.py --sims "$SIMS" 2>&1 | tee artifacts/b_segment_report.txt
+          fi
+
+      # Walk-Forward 是「是否改為預設啟用」的第二道門檻（單次回測對照不足）。
+      # 它跑的是預設組態（三項皆關閉），故只作為樣本外穩定性的參考基線。
+      - name: 執行 Walk-Forward 樣本外驗證
+        continue-on-error: true
+        run: python run_walk_forward.py 2>&1 | tee artifacts/walk_forward_report.txt
+
+      - name: 收集產物
+        if: always()
+        run: |
+          cp -v trendpoint.db artifacts/ 2>/dev/null || echo "（無 trendpoint.db）"
+          mkdir -p artifacts/data && cp -v data/*.csv artifacts/data/ 2>/dev/null || echo "（無 CSV 快取）"
+          ls -la artifacts
+
+      - name: 上傳報告與資料庫
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: b-segment-${{ github.run_id }}
+          path: artifacts/
+          retention-days: 30

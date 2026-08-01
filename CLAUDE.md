@@ -53,7 +53,13 @@ python monitor_signals.py --once   # 單次訊號檢測與推播
   改成迴圈開頭 `continue` 會連出場與權益 append 一起跳過）、`trading_costs.py`
   （CostModel/PositionSizer 元件 + for_asset_class 工廠，spec 008b：現股 ad-valorem/
   期貨每口定額+保證金槓桿）、`portfolio_backtester.py`（**期貨護欄保留**，僅現貨）、
-  `walk_forward.py`、`optimizer.py`、`monte_carlo.py`、`run_*.py` 為各入口
+  `walk_forward.py`、`optimizer.py`、`monte_carlo.py`、`run_*.py` 為各入口。
+  **B 段實測**走 `run_b_segment.py`（012/013 的預設關閉功能之啟用前後對照）——
+  組態覆寫全在記憶體內、不寫回 config；判讀用**兩把尺**（訊號濾網看期望值/PF、
+  風控閘門看 MDD/Calmar，情境表以 `kind` 欄宣告，勿用標籤字串比對）。
+  無法本機取數時走 `.github/workflows/research_b_segment.yml`（手動觸發，
+  產出 artifact）——**此環境的 agent proxy 擋掉 yfinance 與 TAIFEX**（403），
+  但 GitHub runner 可達
 - 資料：`instruments.py`（Instrument 資產類別抽象 + registry，spec 008a）→
   `data_sources/`（可插拔來源 adapter：yfinance/csv/mock + **taifex 真源/finmind 驗證源**
   （spec 010）；`rollover.py` 連續月引擎——量最大月轉倉 + back-adjust）→
