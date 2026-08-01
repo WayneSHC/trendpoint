@@ -16,6 +16,8 @@ TrendPoint - 多標的投資組合回測引擎 (Portfolio Backtest Engine)
 """
 
 import os
+import warnings
+
 import pandas as pd
 import numpy as np
 from typing import Dict, Any, List, Tuple
@@ -37,6 +39,29 @@ from ladder_system import (
     FULL_EXIT_EVENTS
 )
 from performance import compute_performance_metrics
+
+
+def warn_if_entry_gates_enabled(strategy_cfg) -> bool:
+    """spec 013 範圍護欄：組合路徑**未**實作進場閘門，啟用時須明確標註。
+
+    組合路徑有自己的迴圈與權益維護，閘門在此不生效。沉默忽略是不可接受的——
+    使用者會誤以為風控正在保護整個組合，而實際上一道也沒有（research.md D7）。
+
+    刻意用警示而非例外：閘門是單標的路徑的功能，不該讓「在 default 開了閘門」
+    連帶把組合回測整個擋死。回傳是否曾發出警示，供測試斷言。
+    """
+    param_sets = [strategy_cfg.default, *strategy_cfg.ticker_overrides.values()]
+    if not any(p.use_dd_gate or p.use_settlement_gate for p in param_sets):
+        return False
+    warnings.warn(
+        "組合回測路徑尚未支援進場閘門（spec 013）：偵測到 use_dd_gate / "
+        "use_settlement_gate 為真，但組合路徑有獨立的迴圈與權益維護，"
+        "本次回測**不會**套用任何閘門。若要驗證閘門效果請走單標的路徑"
+        "（run_backtest.py / run_ablation.py）。",
+        UserWarning, stacklevel=2,
+    )
+    return True
+
 
 class PortfolioBacktester:
     """
@@ -212,6 +237,9 @@ class PortfolioBacktester:
         執行多標的投資組合對齊回測
         """
         print("開始執行多標的投資組合聯合理財回測...")
+
+        # spec 013 範圍護欄：組合路徑未實作進場閘門，啟用時明確標註（不得沉默忽略）
+        warn_if_entry_gates_enabled(self.cfg.strategy)
 
         # spec 008a 護欄（引擎層）：組合若含期貨 instrument 則拒絕（僅拒絕，不做成本/sizing）
         _reg = InstrumentRegistry.from_config(self.cfg.data.tickers, self.cfg.data.instruments)

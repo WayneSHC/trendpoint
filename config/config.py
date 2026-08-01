@@ -171,6 +171,46 @@ class SingleStrategyParams(BaseModel):
                     "現貨結構上不存在空方路徑（引擎閘門保證）；對現貨 ticker 的 override "
                     "明設 True 會於組態載入時 fail-fast"
     )
+    # ---- 進場閘門（spec 013）：兩道皆預設關閉，關閉時回測行為逐筆逐根不變 ----
+    use_dd_gate: bool = Field(
+        default=False,
+        description="啟用回撤閘門（spec 013）：權益自峰值回落達 dd_limit_pct 時停止開新倉，"
+                    "回升至 dd_resume_pct 以內解除。**只擋進場、不影響任何出場路徑**"
+    )
+    dd_limit_pct: float = Field(
+        default=0.20,
+        gt=0.0, lt=1.0,
+        description="回撤封鎖門檻（正數表幅度，0.20 = 回撤 20%）。預設值僅為形式佔位——"
+                    "閘門預設關閉故不生效；實際值須由 spec 013 SC-015 以 monte_carlo "
+                    "p95 回撤分布校準後決定並記錄依據"
+    )
+    dd_resume_pct: float = Field(
+        default=0.10,
+        ge=0.0, lt=1.0,
+        description="回撤恢復門檻：回撤回升至此值以內解除封鎖。必須嚴格小於 dd_limit_pct"
+                    "（遲滯區間），0.0 代表需回撤完全回復"
+    )
+    use_settlement_gate: bool = Field(
+        default=False,
+        description="啟用結算日封鎖（spec 013）：期貨標的在台指期結算日（每月第三個週三，"
+                    "遇假日順延）不開新倉。對現貨標的無效果且不報錯"
+    )
+
+    @model_validator(mode="after")
+    def _resume_below_limit(self) -> "SingleStrategyParams":
+        """spec 013 FR-005：恢復門檻必須嚴格小於封鎖門檻。
+
+        相等亦拒絕——兩者相等時遲滯區間退化為單一門檻，權益在門檻附近震盪會使
+        閘門逐根翻動（flapping），交易與否取決於小數點後幾位。這是必須被 schema
+        擋下的設定，不是使用者的自由。
+        """
+        if self.dd_resume_pct >= self.dd_limit_pct:
+            raise ValueError(
+                f"dd_resume_pct（{self.dd_resume_pct}）必須嚴格小於 dd_limit_pct"
+                f"（{self.dd_limit_pct}）。兩者之間的遲滯區間是回撤閘門避免逐根翻動的"
+                "唯一機制；相等或反向會讓閘門在門檻附近失去意義。"
+            )
+        return self
 
 class StrategyConfig(BaseModel):
     """
@@ -288,6 +328,72 @@ class DataQualityConfig(BaseModel):
         """依資產類別取離群門檻；AssetClass(str,Enum) 成員 == 其字串值，dict.get 兩者皆可。"""
         return self.max_close_jump_ratio_by_asset.get(asset_class, self.max_close_jump_ratio)
 
+class MaLineConfig(BaseModel):
+    """
+    單一均線的通知設定（spec 014）。
+    """
+    enabled: bool = Field(
+        default=True,
+        description="是否對此條均線發送觸價通知（總開關關閉時本欄不生效）"
+    )
+    period: int = Field(
+        default=20,
+        ge=2,
+        description="均線回看的交易日根數（台股慣例：月 20／季 60／半年 120／年 240）"
+    )
+
+
+class MaAlertConfig(BaseModel):
+    """
+    均線觸價通知設定（spec 014）。
+
+    **刻意不放進 `SingleStrategyParams`**：那承載的是會進入回測、會被 optimizer
+    掃描、會影響訊號的「策略參數」；本區塊是「通知偏好」——不進回測、
+    不影響任何訊號、不該被尋優，也不該稀釋 `ticker_overrides`
+    （「這檔用不同的策略參數」）的語意。
+    """
+    ma_alerts_enabled: bool = Field(
+        default=False,
+        description="均線觸價通知總開關。**預設關閉**——新增的通知類型不應在使用者未要求時自行啟用"
+    )
+    monthly: MaLineConfig = Field(
+        default_factory=lambda: MaLineConfig(period=20), description="月線"
+    )
+    quarterly: MaLineConfig = Field(
+        default_factory=lambda: MaLineConfig(period=60), description="季線"
+    )
+    half_yearly: MaLineConfig = Field(
+        default_factory=lambda: MaLineConfig(period=120), description="半年線"
+    )
+    yearly: MaLineConfig = Field(
+        default_factory=lambda: MaLineConfig(period=240), description="年線"
+    )
+
+    def enabled_periods(self) -> Dict[str, int]:
+        """回傳已啟用之線別 → 週期；總開關關閉時回傳空 dict（呼叫端據此短路）。"""
+        if not self.ma_alerts_enabled:
+            return {}
+        return {
+            name: line.period
+            for name, line in (
+                ("monthly", self.monthly),
+                ("quarterly", self.quarterly),
+                ("half_yearly", self.half_yearly),
+                ("yearly", self.yearly),
+            )
+            if line.enabled
+        }
+
+    def all_periods(self) -> Dict[str, int]:
+        """回傳四條線的週期（不受開關影響）——供儀表板現況表使用（US4）。"""
+        return {
+            "monthly": self.monthly.period,
+            "quarterly": self.quarterly.period,
+            "half_yearly": self.half_yearly.period,
+            "yearly": self.yearly.period,
+        }
+
+
 class SystemConfig(BaseModel):
     """
     全域系統配置規格模型
@@ -298,6 +404,8 @@ class SystemConfig(BaseModel):
     trading_cost: TradingCostConfig = Field(default_factory=TradingCostConfig)
     portfolio: PortfolioConfig = Field(default_factory=PortfolioConfig)
     data_quality: DataQualityConfig = Field(default_factory=DataQualityConfig)
+    # spec 014：均線觸價通知（通知偏好，與策略參數分離——見 MaAlertConfig docstring）
+    alerts: MaAlertConfig = Field(default_factory=MaAlertConfig)
 
     @model_validator(mode="after")
     def _no_short_on_equity_overrides(self) -> "SystemConfig":
