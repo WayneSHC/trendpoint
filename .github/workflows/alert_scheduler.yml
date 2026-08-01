@@ -40,6 +40,21 @@ jobs:
           restore-keys: |
             trendpoint-db-
 
+      # 這個快取原本只承載 sent_alerts 去重表，DB 裡沒有任何行情資料。
+      # 後果是所有「讀 DB」的監控功能在排程環境永遠取不到資料——spec 014 的
+      # 均線通知讀 stock_*_daily，在此靜默略過（只印一行提示），就算把
+      # ma_alerts_enabled 打開也一則都不會發。此步驟即為補上該前提。
+      #
+      # --equity-only 是必要的：TAIFEX 期貨在表空時會回填 1998 年起的全歷史
+      # （每請求節流 2 秒），那是分鐘級以上的重量作業，不能放進 30 分鐘排程。
+      # 期貨監控的連續表仍須在本機以完整 run_ingestion.py 建立。
+      #
+      # 失敗不阻斷推播：run() 逐標的捕捉例外，取數失敗只會少灌一檔；
+      # 即使整步失敗，5 分線訊號仍走現抓路徑，不受影響。
+      - name: 預熱日線資料表（供均線通知等讀庫功能使用）
+        continue-on-error: true
+        run: python run_ingestion.py --equity-only
+
       - name: 執行實時訊號檢測與推播
         env:
           # 舊版 LINE Notify 已於 2025-03-31 停止服務，改用 LINE Messaging API

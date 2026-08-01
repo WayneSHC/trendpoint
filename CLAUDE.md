@@ -60,7 +60,12 @@ python monitor_signals.py --once   # 單次訊號檢測與推播
   `data_ingestion.py` → SQLite `trendpoint.db`（gitignored）；表名一律經
   `db_security.table_name_for`（equity→`stock_*`、futures→`fut_*`、raw 層→`fut_*_raw_*`）；
   `verify_futures_data.py` 雙源交叉驗證（哨兵，需 FINMIND_TOKEN 環境變數）；
-  TXF 監控取數＝讀庫＋當日端點（**禁**輪詢中呼叫重量 fetch()）；`data/*.csv` 為快取
+  TXF 監控取數＝讀庫＋當日端點（**禁**輪詢中呼叫重量 fetch()）；`data/*.csv` 為快取。
+  **現貨只入日線**：`stock_*_5m` 曾被寫入但從未被任何程式讀取，已停止產生
+  （監控端 5 分線一律現抓——繞經 DB 不會少一次下載，5 分線本質是盤中即時資料）。
+  `run_ingestion.py --equity-only` 供排程監控預熱日線表（`alert_scheduler.yml`
+  每 30 分鐘先跑它再跑監控）；**該旗標不可拿掉**——TAIFEX 表空時會回填 1998 年起
+  全歷史（每請求節流 2 秒），放進 30 分鐘排程會爆。期貨連續表仍須本機跑完整 ingestion
 - 通知：`monitor_signals.py` + `alerts.py`（LINE Messaging API / Telegram，無憑證時 Mock）。
   **監控與回測刻意不同源，這不是缺陷**：現貨監控走 5 分線（yfinance 現抓 5 天）＋
   硬編碼結構參數（`structure_period=10`、`use_fvg=True`、`include_regime=False`），

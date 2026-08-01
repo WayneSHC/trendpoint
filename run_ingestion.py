@@ -6,9 +6,12 @@
 TrendPoint - 數據下載與持久化腳本 (Run Ingestion)
 
 spec 008a：改為 registry 驅動——迭代 InstrumentRegistry，依 instrument.source
-分派資料來源 adapter，以 table_name_for 集中命名存表。現貨（yfinance）維持
-日線 + 5 分線；期貨（mock/csv）依其宣告時框。資產類別無關的資料契約驗證吃
+分派資料來源 adapter，以 table_name_for 集中命名存表。現貨（yfinance）為日線；
+期貨（mock/csv/taifex）依其宣告時框。資產類別無關的資料契約驗證吃
 per-asset-class 離群門檻。
+
+現貨不再匯入 5 分線：`stock_*_5m` 表從未被任何程式讀取，監控端的 5 分線一律
+現抓（見 `instruments.equity_instrument` 的說明）。
 """
 
 import os
@@ -93,9 +96,18 @@ def _ingest_taifex(inst, tf: str, sys_cfg, db_path: str, adapter) -> None:
           f"轉倉事件 {len(events)} 次）")
 
 
-def run():
+def run(equity_only: bool = False):
+    """匯入所有 instrument 的所有時框。
+
+    equity_only=True 時**只處理現貨**，跳過期貨。用途是排程監控的日線預熱
+    （見 .github/workflows/alert_scheduler.yml）：TAIFEX 期貨在表空時會觸發
+    1998 年起的全歷史回填（每請求節流 2 秒），那是分鐘級以上的重量作業，
+    絕不能放進每 30 分鐘一次的排程裡。
+    """
     print("=" * 60)
     print("開始執行 TrendPoint 數據抓取任務...")
+    if equity_only:
+        print("（--equity-only：只處理現貨，跳過期貨）")
     print("=" * 60)
 
     sys_cfg = load_config()
@@ -104,6 +116,9 @@ def run():
     os.makedirs("data", exist_ok=True)
 
     for inst in registry.all():
+        if equity_only and inst.asset_class != AssetClass.EQUITY:
+            print(f"\n[跳過非現貨標的：{inst.name}｜id={inst.id}]（--equity-only）")
+            continue
         print(f"\n[處理標的：{inst.name}｜id={inst.id}｜{inst.asset_class.value}｜source={inst.source}]")
         try:
             adapter = get_adapter(inst.source)
@@ -156,8 +171,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="TrendPoint 數據抓取")
     parser.add_argument("--verify", action="store_true",
                         help="匯入後執行雙源交叉驗證（近 30 日；需 FINMIND_TOKEN，缺失則跳過）")
+    parser.add_argument("--equity-only", action="store_true",
+                        help="只匯入現貨（跳過期貨）。供排程監控預熱日線表用——"
+                             "TAIFEX 表空時會觸發全歷史回填，不適合放進 30 分鐘排程")
     args = parser.parse_args()
-    run()
+    run(equity_only=args.equity_only)
     if args.verify:
         from verify_futures_data import run_and_report
         run_and_report(date.today() - _td(days=30), date.today())
