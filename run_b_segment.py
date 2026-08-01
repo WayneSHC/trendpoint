@@ -153,7 +153,26 @@ def evaluate(df: pd.DataFrame,
         "expectancy": _expectancy(s),
         "trade_returns": s.get("trade_returns", []),
         "blown_up": s.get("blown_up", False),
+        "blocked_bars": _blocked_bars(res),
     }
+
+
+def _blocked_bars(res: Dict[str, Any]) -> int:
+    """閘門實際封鎖的根數。
+
+    這是區分「未改善」與**「未測到」**的唯一依據——兩者的指標差全是 0，
+    但在決策上完全相反：前者是「有證據說沒用」，後者是「沒有證據」。
+
+    `block_reason` 是條件輸出欄（僅任一閘門啟用時存在，見 backtester.py），
+    故欄位不存在＝閘門未啟用，回傳 0。
+    """
+    curve = res.get("equity_curve")
+    if curve is None or len(curve) == 0:
+        return 0
+    df = pd.DataFrame(curve) if not isinstance(curve, pd.DataFrame) else curve
+    if "block_reason" not in df.columns:
+        return 0
+    return int((df["block_reason"].astype(str) != "").sum())
 
 
 def calibrate_dd_limit(baseline: Dict[str, Any], n_sims: int = 5000) -> Dict[str, Any]:
@@ -270,14 +289,23 @@ def print_report(ticker: str, instrument, calibration: Dict[str, Any],
 
         signal_line = (f"期望值 {d_exp:+.3%}、PF {d_pf:+.2f}、交易數 {d_trd:+d} → "
                        f"{'期望值改善' if d_exp > 0 else '期望值未改善'}")
-        risk_line = (f"MDD {d_mdd:+.2%}、Calmar {d_cal:+.2f}、交易數 {d_trd:+d} → "
-                     f"{'風險調整後改善' if (d_mdd > 0 or d_cal > 0) else '風險調整後未改善'}")
+
+        # 閘門一根都沒封鎖時，各項指標差必然全為 0——那是**未測到**，不是未改善。
+        # 把「沒有證據」印成「有證據說沒用」會直接導向相反的決策，故此處不給判定。
+        blocked = int(r.get("blocked_bars", 0))
+        if blocked == 0:
+            risk_line = ("封鎖 0 根 → **未觸發，無對照數據**"
+                         "（本門檻下閘門從未啟動，不得據此判定有效或無效）")
+        else:
+            risk_line = (f"封鎖 {blocked} 根、MDD {d_mdd:+.2%}、Calmar {d_cal:+.2f}、"
+                         f"交易數 {d_trd:+d} → "
+                         f"{'風險調整後改善' if (d_mdd > 0 or d_cal > 0) else '風險調整後未改善'}")
 
         if kind == "signal":
             print(f"  [訊號濾網] {r['label']}：{signal_line}（總報酬 {d_ret:+.2%} 僅供參考）")
         elif kind == "risk":
-            print(f"  [風控閘門] {r['label']}：{risk_line}"
-                  f"（總報酬 {d_ret:+.2%} **不作為判準**）")
+            tail = "" if blocked == 0 else f"（總報酬 {d_ret:+.2%} **不作為判準**）"
+            print(f"  [風控閘門] {r['label']}：{risk_line}{tail}")
         else:
             # 混合情境：兩把尺都要看，且**不給單一結論**——訊號濾網與風控閘門
             # 的效果在此疊加，任一指標的變化都無法歸因到特定機制。

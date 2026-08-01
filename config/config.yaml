@@ -8,6 +8,10 @@ data:
     throttle_seconds: 2.0
     max_retries: 3
     verify_tolerance: 0.0
+  # 現貨日線取數期間。max：B 段實測顯示 10y 下各標的僅 6~14 筆交易，
+  # 遠低於統計推論所需的 30 筆。代價是納入 1990 年代台股（市場結構不同）——
+  # 樣本量與同質性的取捨，要縮短請改這裡，勿回頭在 adapter 硬編碼。
+  equity_history_period: max
   tickers:
   - 2330.TW
   - 0050.TW

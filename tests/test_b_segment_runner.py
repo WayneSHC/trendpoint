@@ -184,10 +184,10 @@ def test_report_uses_different_yardsticks(capsys, cfg):
         {"label": "基準（三項皆關閉）", "kind": "baseline", "skipped": False, "total_return": 0.10,
          "max_drawdown": -0.10, "calmar": 1.0, "sharpe": 0.8, "total_trades": 40,
          "win_rate": 0.5, "profit_factor": 1.5, "expectancy": 0.003},
-        # 風控：報酬下降但 MDD 改善 → 應判為改善
+        # 風控：報酬下降但 MDD 改善 → 應判為改善（閘門確實有封鎖，故判定成立）
         {"label": "啟用回撤閘門", "kind": "risk", "skipped": False, "total_return": 0.04,
          "max_drawdown": -0.05, "calmar": 1.4, "sharpe": 0.9, "total_trades": 25,
-         "win_rate": 0.52, "profit_factor": 1.6, "expectancy": 0.002},
+         "win_rate": 0.52, "profit_factor": 1.6, "expectancy": 0.002, "blocked_bars": 31},
         # 訊號濾網：交易數下降且期望值未改善
         {"label": "啟用 BOS 量能確認", "kind": "signal", "skipped": False, "total_return": 0.06,
          "max_drawdown": -0.11, "calmar": 0.9, "sharpe": 0.7, "total_trades": 18,
@@ -200,6 +200,57 @@ def test_report_uses_different_yardsticks(capsys, cfg):
     assert "不作為判準" in out, "風控列必須標明總報酬不作為判準"
     assert "期望值未改善" in out, "訊號濾網列應以期望值判定"
     assert "run_walk_forward" in out, "必須提醒單次對照不足以支撐採用決定"
+
+
+def test_untriggered_gate_reports_no_data_not_no_improvement(capsys):
+    """閘門一根都沒封鎖時，必須說「未觸發」而非「未改善」。
+
+    這條守的是一個實際發生過、而且比計算錯誤更危險的判讀缺陷：閘門未觸發時
+    所有指標差必然為 0，舊版報表據此印出「風險調整後未改善」——把**沒有證據**
+    呈現成**有證據說沒用**。這兩者在「是否改為預設啟用」的決策上完全相反。
+
+    真實情境並不罕見：SC-015 以重抽分布深尾校準的門檻（實測 8.9%~17.6%）
+    按定義就比單一歷史路徑的 MDD（實測 5.4%~8.7%）深，故在對照中極少觸發。
+    """
+    rows = [
+        {"label": "基準（三項皆關閉）", "kind": "baseline", "skipped": False, "total_return": 0.10,
+         "max_drawdown": -0.10, "calmar": 1.0, "sharpe": 0.8, "total_trades": 40,
+         "win_rate": 0.5, "profit_factor": 1.5, "expectancy": 0.003},
+        # 逐欄與基準相同 + 封鎖 0 根 = 閘門從未啟動
+        {"label": "啟用回撤閘門", "kind": "risk", "skipped": False, "total_return": 0.10,
+         "max_drawdown": -0.10, "calmar": 1.0, "sharpe": 0.8, "total_trades": 40,
+         "win_rate": 0.5, "profit_factor": 1.5, "expectancy": 0.003, "blocked_bars": 0},
+    ]
+    bs.print_report("TEST", EQUITY, {"available": False, "reason": "測試"}, rows)
+    out = capsys.readouterr().out
+
+    assert "未觸發" in out and "無對照數據" in out
+    assert "未改善" not in out, "未觸發被誤報為未改善——這會導向相反的決策"
+    assert "不得據此判定" in out
+
+
+def test_blocked_bars_counts_only_blocked_rows():
+    """`block_reason` 非空的根數即封鎖數；欄位不存在（閘門未啟用）時為 0。"""
+    with_gate = {"equity_curve": [
+        {"equity": 1.0, "block_reason": ""},
+        {"equity": 1.0, "block_reason": "drawdown"},
+        {"equity": 1.0, "block_reason": "settlement"},
+        {"equity": 1.0, "block_reason": "drawdown+settlement"},
+    ]}
+    assert bs._blocked_bars(with_gate) == 3
+
+    # 條件輸出欄：閘門未啟用時 equity_curve 根本沒有 block_reason
+    assert bs._blocked_bars({"equity_curve": [{"equity": 1.0}, {"equity": 1.0}]}) == 0
+    assert bs._blocked_bars({}) == 0
+
+
+def test_run_scenarios_reports_blocked_bars(cfg):
+    """實跑產生的列必須帶 blocked_bars，否則報表無從區分未觸發與未改善。"""
+    rows = bs.run_scenarios(daily_klines(400), EQUITY, cfg, dd_limit_pct=0.02)
+    gate = next(r for r in rows if r["label"] == "啟用回撤閘門")
+    assert "blocked_bars" in gate
+    # 門檻收到 2% 時閘門必然觸發，否則這條測試永遠為綠
+    assert gate["blocked_bars"] > 0
 
 
 def test_report_flags_small_sample_calibration(capsys):
@@ -245,7 +296,8 @@ def test_combined_scenario_refuses_to_attribute(capsys):
          "total_trades": 40, "win_rate": 0.5, "profit_factor": 1.5, "expectancy": 0.003},
         {"label": "三項全開", "kind": "combined", "skipped": False,
          "total_return": 0.05, "max_drawdown": -0.06, "calmar": 1.3, "sharpe": 0.9,
-         "total_trades": 15, "win_rate": 0.6, "profit_factor": 1.8, "expectancy": 0.004},
+         "total_trades": 15, "win_rate": 0.6, "profit_factor": 1.8, "expectancy": 0.004,
+         "blocked_bars": 12},
     ]
     bs.print_report("TEST", EQUITY, {"available": False, "reason": "測試"}, rows)
     out = capsys.readouterr().out
