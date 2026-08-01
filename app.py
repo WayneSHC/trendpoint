@@ -323,15 +323,15 @@ with st.sidebar.expander("管理觀察標的"):
                 st.error("股票代號格式錯誤，僅允許英文、數字、點與減號。")
             else:
                 db_path_tmp = cfg.data.database_path
+                # 只抓日線並入庫：5 分線表從未被任何程式讀取（監控端一律現抓），
+                # 見 instruments.equity_instrument 的說明。
                 with st.spinner(f"正在連線下載 {new_ticker} 最新數據……"):
                     df_verify = fetch_stock_data(ticker=new_ticker, period="10y", interval="1d")
-                    df_verify_5m = fetch_stock_data(ticker=new_ticker, period="5d", interval="5m")
 
-                if df_verify is not None and not df_verify.empty and df_verify_5m is not None and not df_verify_5m.empty:
+                if df_verify is not None and not df_verify.empty:
                     daily_ok = safe_save_to_sqlite(df_verify, table_name_for(equity_instrument(new_ticker), "daily"), db_path_tmp)
-                    m5_ok = safe_save_to_sqlite(df_verify_5m, table_name_for(equity_instrument(new_ticker), "5m"), db_path_tmp)
 
-                    if daily_ok and m5_ok:
+                    if daily_ok:
                         from config.config import save_config, SingleStrategyParams
                         cfg.data.tickers.append(new_ticker)
                         cfg.strategy.ticker_overrides[new_ticker] = SingleStrategyParams()
@@ -357,6 +357,8 @@ with st.sidebar.expander("管理觀察標的"):
             import sqlite3
 
             table_daily_del = table_name_for(equity_instrument(ticker_to_delete), "daily")
+            # 5m 表已不再產生，但**保留刪除**——既有 DB 裡可能留有舊表，
+            # 這是唯一會清掉它們的地方。DROP IF EXISTS 對不存在的表無害。
             table_5m_del = table_name_for(equity_instrument(ticker_to_delete), "5m")
             validate_table_name(table_daily_del)
             validate_table_name(table_5m_del)

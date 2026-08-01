@@ -76,7 +76,9 @@ TELEGRAM_TOKEN=你的 Bot Token
 TELEGRAM_CHAT_ID=你的 chat id
 ```
 
-GitHub Actions（[`.github/workflows/alert_scheduler.yml`](.github/workflows/alert_scheduler.yml)）每 30 分鐘自動執行一次監控，憑證以同名 Repository Secrets 提供。
+GitHub Actions（[`.github/workflows/alert_scheduler.yml`](.github/workflows/alert_scheduler.yml)）每 30 分鐘自動執行一次監控，憑證以同名 Repository Secrets 提供。該排程會先執行 `python run_ingestion.py --equity-only` 預熱日線資料表（均線通知等讀庫功能需要它），再執行監控；5 分鐘線訊號一律即時抓取，不經資料庫。
+
+> `--equity-only` 是刻意的：期貨連續表在表空時會回填 1998 年起的全歷史，屬分鐘級以上的重量作業，須在本機以完整的 `python run_ingestion.py` 建立。
 
 ### 均線觸價通知（月／季／半年／年線）
 
