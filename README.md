@@ -57,6 +57,7 @@ python run_backtest.py
 | `python run_optimization.py` | 策略參數自動尋優 |
 | `python run_walk_forward.py` | Walk-Forward 樣本內 / 樣本外驗證 |
 | `python run_ablation.py` | 進場濾網消融測試 |
+| `python run_b_segment.py` | 進場閘門／量能濾網的啟用前後實測對照（需真實資料） |
 | `python monitor_signals.py --once` | 執行單次即時訊號檢測與推播 |
 | `python monitor_signals.py --test-alert` | 發送一筆測試訊息驗證推播管道 |
 
@@ -106,6 +107,25 @@ alerts:
   以 30 根日線算出的「年線」是誤導。
 - 期貨標的不適用（連續序列經 back-adjust，價位水準與當年真實市價脫節）。
 
+## 預設關閉功能的實測（B 段）
+
+spec 012（BOS 量能確認）與 spec 013（進場閘門）的功能**一律預設關閉**，是否採用
+需以真實資料實測裁決。實測由 [`run_b_segment.py`](run_b_segment.py) 驅動，它會：
+
+1. 自基準回測的逐筆報酬做蒙地卡羅重抽，取 **p95 回撤**校準 `dd_limit_pct`；
+2. 以校準後的門檻跑「各功能單獨啟用 / 全開」的對照表；
+3. 以**兩把不同的尺**判讀——訊號濾網看期望值／PF，風控閘門看 MDD／Calmar。
+
+> **以總報酬判定風控閘門無效，是這個專案最容易犯的判讀錯誤**：閘門的工作就是
+> 少做交易，總報酬下降屬預期行為。
+
+本機執行：`python run_ingestion.py && python run_b_segment.py`。
+
+若本機無法取得行情資料，可改用 GitHub Actions
+（[`research_b_segment.yml`](.github/workflows/research_b_segment.yml)，手動觸發）——
+它會在 runner 上完成匯入與實測，並把報告、`trendpoint.db` 與 CSV 快取上傳為 artifact。
+組態不會被改動：所有覆寫都在記憶體內完成。
+
 ## 測試
 
 ```bash
@@ -129,6 +149,7 @@ risk_gates.py             進場閘門（回撤上限 / 結算日封鎖，預設
 data_ingestion.py         K 線資料下載與清洗
 monitor_signals.py        即時訊號監控
 ma_lines.py               均線觸價通知的純函式元件
+run_b_segment.py          預設關閉功能的實測驅動（B 段）
 alerts.py                 LINE / Telegram 推播管理
 config/                   設定（config.yaml）
 specs/                    功能規格（Spec Kit）
