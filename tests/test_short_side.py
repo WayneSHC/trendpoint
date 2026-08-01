@@ -73,6 +73,15 @@ def test_check_entry_short_mirror_truth_table():
     # 消融：破壞的維度被停用 → 恢復通過（語意同多方）
     assert pm.check_entry_signal(**bad_momentum, direction=-1,
                                  disabled_filters=frozenset({'momentum'})) is True
+    # spec 012 SC-004：量能維度加入真值表，兩側同式且無方向性
+    assert pm.check_entry_signal(**_BASE_SHORT, direction=-1, volume_ok=False) is False
+    assert pm.check_entry_signal(**_BASE_LONG, direction=1, volume_ok=False) is False
+    # 量能維度亦可消融（語意與其餘五道一致）
+    assert pm.check_entry_signal(**_BASE_SHORT, direction=-1, volume_ok=False,
+                                 disabled_filters=frozenset({'bos_volume'})) is True
+    # 其餘維度的真值表不因新維度而改變（volume_ok 預設 True）
+    assert pm.check_entry_signal(**_BASE_SHORT, direction=-1) is True
+    assert pm.check_entry_signal(**bad_structure, direction=-1, volume_ok=True) is False
 
 
 def test_check_entry_short_daily_semantics():

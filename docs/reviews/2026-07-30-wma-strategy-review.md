@@ -122,6 +122,13 @@ bull_mss = (trend_down & (close > conf_swing_high) & displacement & ~bull_bos)
 理由：現有量能資訊已算好、只差沒接；改動小；`run_ablation.py` 能直接給出
 「停用後績效變差 → 保留 / 不變或更好且交易數增加 → 移除」的判決。
 
+> **已開案並完成 A 段**：[`specs/012-bos-volume-confirmation/`](../../specs/012-bos-volume-confirmation/)。
+> 實作與此處的構想有一點重要出入：**不是**把 `displacement` 條件「接到」BOS 路徑，
+> 而是另立 `calculate_volume_confirmation` 獨立函式。原因是 `displacement` 內生於
+> `detect_market_structure` 的 MSS 判定，在訊號層抑制 BOS 會讓 `~bos` 互斥條件
+> 放行原本被排除的 MSS——那不是加濾網，是改寫訊號定義。濾網因此接在
+> **進場判定層**，且只作用於續勢分支。**預設關閉**，是否採用待真實資料實測（SC-010）。
+
 ### 2. `ma_period` 從 200 掃到 60（零程式碼，最便宜）
 影片的 60 與現行的 200 差距很大：60 日閘會在回檔後更快放行、交易數增加、
 再入場更早，但盤整期假放行也更多。這純粹是實證問題，交給 `optimizer.py` /

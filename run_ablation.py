@@ -48,6 +48,7 @@ ABLATION_TARGETS = [
     ("停用全域濾網 (三關價+市況)", "global"),
     ("停用市況濾網 (ADX/長均線)", "regime"),
     ("停用 FVG 確認", "fvg"),
+    ("停用 BOS 量能確認", "bos_volume"),
     # spec 013：風控閘門。與上列訊號濾網的判讀方向相反（見模組 docstring）
     ("停用回撤閘門", "dd_gate"),
     ("停用結算日閘門", "settlement_gate"),
@@ -58,6 +59,10 @@ RISK_GATE_KEYS = {
     "dd_gate": "use_dd_gate",
     "settlement_gate": "use_settlement_gate",
 }
+
+# 需要「該機制先啟用」才有資訊量的消融鍵 → 對應的組態旗標。
+# 風控閘門與 BOS 量能確認皆預設關閉，未啟用時該列與基準列完全相同。
+OPT_IN_KEYS = {**RISK_GATE_KEYS, "bos_volume": "use_bos_volume"}
 
 
 def _expectancy(summary: dict) -> float:
@@ -79,10 +84,10 @@ def run_ablation_for_ticker(engine: BacktestEngine, cfg, ticker: str, df) -> lis
         # 消融的意義是「相對基準關掉某道機制」。風控閘門在組態上未啟用時，
         # 這一列與基準列完全相同、無任何資訊量——**明示略過**而非靜默印出
         # 一組和基準一樣的數字（那會被誤讀成「關掉閘門沒有影響」）。
-        gate_flag = RISK_GATE_KEYS.get(disabled)
-        if gate_flag is not None and not getattr(params, gate_flag):
+        opt_in_flag = OPT_IN_KEYS.get(disabled)
+        if opt_in_flag is not None and not getattr(params, opt_in_flag):
             results.append({"label": label, "skipped": True,
-                            "note": f"未啟用（{gate_flag}=false），略過"})
+                            "note": f"未啟用（{opt_in_flag}=false），略過"})
             continue
 
         res = engine.run_backtest(
@@ -102,6 +107,9 @@ def run_ablation_for_ticker(engine: BacktestEngine, cfg, ticker: str, df) -> lis
             er_threshold=params.er_threshold,
             use_fvg=params.use_fvg,
             fvg_lookback=params.fvg_lookback,
+            use_bos_volume=params.use_bos_volume,
+            bos_volume_mult=params.bos_volume_mult,
+            bos_volume_period=params.bos_volume_period,
             use_dd_gate=params.use_dd_gate,
             dd_limit_pct=params.dd_limit_pct,
             dd_resume_pct=params.dd_resume_pct,
@@ -114,7 +122,7 @@ def run_ablation_for_ticker(engine: BacktestEngine, cfg, ticker: str, df) -> lis
         results.append({
             "label": label,
             "skipped": False,
-            "is_risk_gate": gate_flag is not None,
+            "is_risk_gate": disabled in RISK_GATE_KEYS,
             "total_return": s.get("total_return", 0.0),
             "max_drawdown": s.get("max_drawdown", 0.0),
             "calmar": s.get("calmar_ratio", 0.0),

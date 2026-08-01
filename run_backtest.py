@@ -127,7 +127,18 @@ def run():
                 swing_n=params.swing_fractal_n,
                 volume_mult=params.mss_volume_mult,
                 mss_reversal_entry=params.mss_reversal_entry,
-                enable_short=params.enable_short
+                enable_short=params.enable_short,
+                # spec 012：BOS 量能確認（預設關閉）
+                use_bos_volume=params.use_bos_volume,
+                bos_volume_mult=params.bos_volume_mult,
+                bos_volume_period=params.bos_volume_period,
+                # spec 013：進場閘門（預設關閉）。實作 012 時發現此入口漏接——
+                # 少了這幾行，config 裡把閘門打開對本腳本毫無作用，使用者會以為
+                # 風控已生效。消融入口（run_ablation.py）當時已接。
+                use_dd_gate=params.use_dd_gate,
+                dd_limit_pct=params.dd_limit_pct,
+                dd_resume_pct=params.dd_resume_pct,
+                use_settlement_gate=params.use_settlement_gate
             )
             
             summary = results["summary"]

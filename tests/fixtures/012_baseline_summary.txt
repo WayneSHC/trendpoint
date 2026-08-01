@@ -1,0 +1,11 @@
+# spec 012 T002 基準凍結（實作前行為）
+# commit: 9bfb0fc0d739f0ba363faf24bc321244a21174c3
+# fixture: bos_volume_fixtures.daily_klines()（600 根日線，seed=23）
+# 產生方式: BacktestEngine(initial_capital=1_000_000.0).run_backtest(df, verbose=False)（全預設參數）
+# 數值以 %.17g 寫出；讀取端須用 float_precision='round_trip'
+# equity_curve 終值與欄位集（SC-001 的第二、三層）
+bars=599
+final_equity=889119.09185576206
+total_return=-0.11088090814423794
+total_trades=7
+equity_columns=capital,position_value,equity

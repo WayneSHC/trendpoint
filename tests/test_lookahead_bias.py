@@ -720,3 +720,114 @@ def test_entry_gate_reads_state_before_updating_it():
         assert dd.iloc[i - 1] <= -0.04, (
             f"第 {i} 根被封鎖，但其**前一根**的回撤 {dd.iloc[i - 1]:.4f} 未達門檻——"
             "代表閘門用到了當根權益（update 被搬到迴圈開頭）")
+
+
+# ==================== spec 012：BOS 量能確認的看前偏誤防禦（SC-006，T022）====================
+
+def _bos_volume_kwargs():
+    return dict(use_bos_volume=True, bos_volume_mult=1.5, bos_volume_period=20,
+                verbose=False)
+
+
+def test_bos_volume_no_lookahead_on_future_volume_tamper():
+    """SC-006：篡改判定根**之後**的成交量，不改變其前的任何進場判定。
+
+    量能是本濾網唯一的輸入，故篡改對象必須是 volume 而非價格——改價格會同時
+    動到結構訊號，測試就分不清是哪一層在防守。
+    """
+    from bos_volume_fixtures import daily_klines
+
+    df_orig = daily_klines()
+    split_idx = 300
+    split_time = df_orig.index[split_idx]
+
+    df_mod = df_orig.copy()
+    df_mod.iloc[split_idx:, df_mod.columns.get_loc("volume")] *= 50.0   # 未來爆量
+
+    engine = BacktestEngine(initial_capital=1_000_000.0)
+    res_orig = engine.run_backtest(df_orig, **_bos_volume_kwargs())
+    res_mod = engine.run_backtest(df_mod, **_bos_volume_kwargs())
+
+    t_orig = res_orig["trades"]
+    assert not t_orig.empty, "fixture 失去鑑別力：啟用濾網後沒有任何交易"
+
+    b_orig = t_orig[t_orig["datetime"] < split_time].reset_index(drop=True)
+    b_mod = res_mod["trades"]
+    b_mod = b_mod[b_mod["datetime"] < split_time].reset_index(drop=True)
+    assert len(b_orig) == len(b_mod), "未來成交量改變了歷史交易筆數——存在看前偏誤"
+    for col in ("datetime", "action", "shares", "price"):
+        assert (b_orig[col].to_numpy() == b_mod[col].to_numpy()).all(), \
+            f"未來成交量改變了過去的交易（欄 {col}）"
+
+
+def test_bos_volume_no_lookahead_on_appended_future_bars():
+    """SC-006 第二式：序列尾端**追加**資料不改變既有根的量能判定。"""
+    from bos_volume_fixtures import daily_klines
+    from ladder_system import calculate_volume_confirmation
+
+    full = daily_klines()
+    head = full.iloc[:400]
+
+    v_head = calculate_volume_confirmation(head)
+    v_full = calculate_volume_confirmation(full)
+    assert (v_head.to_numpy() == v_full.iloc[:len(head)].to_numpy()).all(), \
+        "追加未來資料改變了既有根的量能判定"
+
+    engine = BacktestEngine(initial_capital=1_000_000.0)
+    r_head = engine.run_backtest(head, **_bos_volume_kwargs())
+    r_full = engine.run_backtest(full, **_bos_volume_kwargs())
+    cutoff = head.index[-1]
+    t_head = r_head["trades"].reset_index(drop=True)
+    t_full = r_full["trades"]
+    t_full = t_full[t_full["datetime"] <= cutoff].reset_index(drop=True)
+    assert len(t_head) == len(t_full)
+    for col in ("datetime", "action", "shares", "price"):
+        assert (t_head[col].to_numpy() == t_full[col].to_numpy()).all()
+
+
+def test_bos_volume_shift_is_load_bearing():
+    """鑑別力對照：`.shift(1)` 若被移除，本測試必須失敗。
+
+    注意一個容易寫出假測試的陷阱：多數序列上「有無 shift」的**布林結果相同**——
+    判定根自身的量偏高時，它同時抬高分子與門檻，兩邊往往同號。只斷言
+    「量能確認為 True」抓不到 shift 被移除。
+
+    故本測試取一根**兩者結論相反**的資料：量 [1,1,1,100,40]、period=3、mult=1.0，
+    看 index 4：
+
+        有 shift：均量 = (1+1+100)/3  ≈ 34.0 → 40 > 34.0  → True
+        無 shift：均量 = (1+100+40)/3 ≈ 47.0 → 40 > 47.0  → False
+
+    另外直接斷言均量的**數值**，不讓布林塌縮遮蔽差異。
+    """
+    from ladder_system import calculate_volume_confirmation
+
+    idx = pd.bdate_range("2024-01-01", periods=5, name="datetime")
+    close = pd.Series([100.0] * 5, index=idx)
+    df = pd.DataFrame(
+        {"open": close, "high": close + 1, "low": close - 1, "close": close,
+         "volume": pd.Series([1.0, 1.0, 1.0, 100.0, 2.0], index=idx)},
+        index=idx,
+    )
+
+    got = calculate_volume_confirmation(df, period=3, mult=1.5)
+
+    # 有 shift 時 index 3 的均量恰為 1.0（前三根），門檻 1.5，量 100 → True
+    assert bool(got.iloc[3]) is True
+
+    # 均量的數值層鑑別：index 4 的均量須為「含 index 3 的爆量、不含自身」
+    shifted_ma = df["volume"].rolling(3).mean().shift(1)
+    unshifted_ma = df["volume"].rolling(3).mean()
+    assert shifted_ma.iloc[4] == pytest.approx((1.0 + 1.0 + 100.0) / 3.0)
+    assert unshifted_ma.iloc[4] == pytest.approx((1.0 + 100.0 + 2.0) / 3.0)
+    assert shifted_ma.iloc[4] != pytest.approx(unshifted_ma.iloc[4]), \
+        "本測試的鑑別前提不成立——序列需使 shift 前後的均量不同"
+
+    # 並確認實作用的是 shifted 版本：以一根「兩者結論相反」的資料釘死
+    #   量 [1,1,1,100,40]、period=3、mult=1.0
+    #   有 shift ：ma(index4) = (1+1+100)/3 ≈ 34.0 → 40 > 34.0  → True
+    #   無 shift ：ma(index4) = (1+100+40)/3 ≈ 47.0 → 40 > 47.0 → False
+    df2 = df.copy()
+    df2.iloc[4, df2.columns.get_loc("volume")] = 40.0
+    assert bool(calculate_volume_confirmation(df2, period=3, mult=1.0).iloc[4]) is True, \
+        "實作未使用 .shift(1) 的均量——移除 shift 時本斷言即失敗"

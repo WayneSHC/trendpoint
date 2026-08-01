@@ -1,0 +1,28 @@
+# spec 012 T002 基準凍結（實作前行為）
+# commit: 9bfb0fc0d739f0ba363faf24bc321244a21174c3
+# fixture: bos_volume_fixtures.daily_klines()（600 根日線，seed=23）
+# 產生方式: BacktestEngine(initial_capital=1_000_000.0).run_backtest(df, verbose=False)（全預設參數）
+# 數值以 %.17g 寫出；讀取端須用 float_precision='round_trip'
+# build_indicator_frame(structure_period=10, use_fvg=False) 的欄位集（含順序）
+open
+high
+low
+close
+volume
+atr
+vwap
+regime_ok
+regime_ok_short
+mss_signal
+bos_signal
+ladder
+chandelier_long
+chandelier_short
+date
+daily_open
+yesterday_high
+yesterday_low
+mid_price
+diff
+upper_price
+lower_price

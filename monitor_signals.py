@@ -186,9 +186,17 @@ def check_new_signals(ticker: str, alert_mgr: AlertManager, instrument=None):
     # 消除兩端重複內聯。監控端不需市況濾網，故 include_regime=False。
     # 即時告警亦套 FVG 確認（spec 002 R6，減少假反轉告警）；monitor 現不穿線
     # strategy 參數，故用常數預設 use_fvg=True, fvg_lookback=3。
+    # spec 012：本案三個新參數自 config 穿線（預設關閉 → 行為與實作前逐字相同）。
+    # **既有的 structure_period=10 / use_fvg=True / fvg_lookback=3 硬編碼保持不動**——
+    # 順手把它們也改成走 config 會改變預設行為（config 的 structure_period 與
+    # use_fvg 值不同），那是另一案的事（research.md D5）。
+    _p = cfg.strategy.get_params_for_ticker(ticker)
     df = ladder_system.build_indicator_frame(
         df, structure_period=10, include_regime=False,
-        use_fvg=True, fvg_lookback=3)
+        use_fvg=True, fvg_lookback=3,
+        use_bos_volume=_p.use_bos_volume,
+        bos_volume_mult=_p.bos_volume_mult,
+        bos_volume_period=_p.bos_volume_period)
 
     # 3. 取得最新「已收盤」的 K 線與其前一根進行突破判斷。
     # 盤中末根是進行中的 bar，不得用於訊號判定（repaint 防禦）
@@ -221,14 +229,17 @@ def check_new_signals(ticker: str, alert_mgr: AlertManager, instrument=None):
                 mark_alert_as_sent(ticker, latest_time, alert_type)
 
     # 訊號 B：BOS 趨勢延續 (1為多頭強勢突破，-1為空頭強勢突破)
-    if latest_bar['bos_signal'] == 1:
+    # spec 012：濾網啟用時，BOS 告警額外要求量能確認——使監控端與回測端對
+    # 「續勢進場候選」的判定一致（量能未達門檻的 BOS 不推播）。MSS 告警不受影響。
+    bos_volume_ok = (not _p.use_bos_volume) or bool(latest_bar.get('bos_volume_ok', True))
+    if latest_bar['bos_signal'] == 1 and bos_volume_ok:
         alert_type = "BULLISH_BOS"
         if not is_alert_already_sent(ticker, latest_time, alert_type):
             msg = f"<b>【多頭趨勢延續】</b>\n標的: {ticker}\n時間: {latest_time}\n價格: {latest_bar['close']:.2f}\n說明: 偵測到 BOS 結構連續突破，多頭力道持續加強！\n當前階梯參考價: {latest_bar['ladder']:.2f}"
             if alert_mgr.send_alert(mock_prefix + msg + intraday_note):
                 mark_alert_as_sent(ticker, latest_time, alert_type)
                 
-    elif latest_bar['bos_signal'] == -1:
+    elif latest_bar['bos_signal'] == -1 and bos_volume_ok:
         alert_type = "BEARISH_BOS"
         if not is_alert_already_sent(ticker, latest_time, alert_type):
             msg = f"<b>【空頭趨勢延續】</b>\n標的: {ticker}\n時間: {latest_time}\n價格: {latest_bar['close']:.2f}\n說明: 偵測到 BOS 結構連續跌破，空頭趨勢強烈加壓！\n當前階梯參考價: {latest_bar['ladder']:.2f}"

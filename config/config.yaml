@@ -56,6 +56,13 @@ strategy:
     # spec 003：期貨做空（預設關；僅期貨生效——現貨結構上無空方路徑）。
     # 對期貨標的啟用：於 ticker_overrides 對期貨 instrument id（如 TXF）設 enable_short: true
     # enable_short: false
+    # spec 012：BOS 續勢進場的量能確認（**預設關閉**）。
+    # 與 mss_volume_mult 獨立——後者是 MSS 位移確認，作用於反轉路徑，兩者不共用參數。
+    # 回看期刻意不綁定 structure_period（結構樞紐的回看窗與「均量該取多長」
+    # 無先驗關聯，理由見 specs/012-bos-volume-confirmation/research.md D4）。
+    use_bos_volume: false
+    bos_volume_mult: 1.5
+    bos_volume_period: 20
     # spec 013：進場閘門（兩道皆預設關閉）。關閉時回測結果與本案實作前逐筆逐根一致。
     # dd_limit_pct / dd_resume_pct 的預設值**僅為形式佔位**——閘門關閉故不生效；
     # 實際採用值須由 SC-015 以 monte_carlo 的 p95 回撤分布校準後決定並記錄依據
