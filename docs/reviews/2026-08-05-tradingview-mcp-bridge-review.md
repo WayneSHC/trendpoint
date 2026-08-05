@@ -330,7 +330,76 @@ TradingView session、執行任意 JS。
 
 ---
 
-## 七、建議行動
+## 七、兩專案並列比較
+
+### 先講：這不是同類產品
+
+**Coocolab 繁中版**是 agent 工具層——一個控制看盤軟體的 MCP server。
+**TrendPoint** 是量化研究系統——訊號 + 回測 + 驗證 + 推播。
+
+兩者的重疊只有一塊：**「產生交易判斷」這件事怎麼做、怎麼被信任**。
+以下只比重疊的部分；比「MCP server 有沒有回測引擎」是不公平的問法。
+
+### 逐項對照
+
+| 面向 | Coocolab 繁中版 | TrendPoint | 較優 |
+|---|---|---|---|
+| **訊號如何定義** | `rules.json` 自然語言字串，LLM 每次重新解讀 | `ladder_system.py` 確定性純函式，參數集中於 `config/config.yaml` + Pydantic schema | TrendPoint |
+| **可重現性** | 無保證。同一份資料跑兩次可能得到不同 bias | 同輸入必同輸出，有測試守門 | TrendPoint |
+| **驗證方法** | `RESEARCH.md` 自陳「沒有正式評估框架——發現純粹是觀察性的」 | 回測 + walk-forward + 消融 + Monte Carlo + 參數高原檢查 | TrendPoint |
+| **摩擦成本** | 未見成本模型 | `trading_costs.py`：現股 ad-valorem／期貨每口定額 + 保證金槓桿，費率唯一來源 config | TrendPoint |
+| **看前偏誤** | 未見防禦機制 | rolling 必 `.shift(1)`、第 N 根出訊號第 N+1 根開盤成交、`tests/test_lookahead_bias.py` 守門 | TrendPoint |
+| **風控** | `risk_rules` 四句人話 | spec 013 `DrawdownGate` 狀態機 + `settlement_days` 純函式 + 基準凍結 fixture | TrendPoint |
+| **對「有效」的宣稱紀律** | 未討論 | 明文禁止在 B 段實測（SC-014/015）完成前宣稱本案「降低了回撤」 | TrendPoint |
+| **資料完整性** | TradingView 連續合約，back-adjust 規則不透明 | spec 011 雙價格（調整後供訊號、`unadj_*` 供名目值），缺欄硬失敗不 fallback | TrendPoint |
+| **資料源可信度** | 未公開內部 API，「任何更新都可能無預警壞掉」 | TAIFEX 官方 + FinMind 雙源交叉驗證（`verify_futures_data.py`） | TrendPoint |
+| **自動化執行** | 需 GUI + 登入 + debug port 常開 | headless：GitHub Actions cron 每 30 分鐘 | TrendPoint |
+| **版控紀律** | 實盤成交日誌 commit 進公開 repo | 憑證走環境變數／Secrets，`trendpoint.db` gitignored | TrendPoint |
+| **多時框** | `timeframes` 角色化（bias／entry／management） | **無跨時框邏輯**，參數是無時框語意的根數 | **Coocolab** |
+| **Pine／圖表整合** | 編譯-錯誤-修復循環（`RESEARCH.md` 自陳最強應用） | 無 | **Coocolab** |
+| **互動探索速度** | 對話式切圖、換時框、即時看結果 | 改 config → 跑 script → 看輸出 | **Coocolab** |
+| **視覺化重放** | `replay_*` 逐根重放 + 標記進出場 | `app.py` 靜態圖表 | **Coocolab** |
+| **市場覆蓋** | 全球（美股／加密／期貨） | 台股 + 台指期 | **Coocolab**（廣度） |
+| **上手成本** | 20–30 分鐘 | 建 DB + 跑 ingestion + 熟悉 spec 體系 | **Coocolab** |
+| **agent 守則細緻度** | 輸出規模預期表 + 硬上限 + 工具決策樹 | 行為規則齊全（鐵律 2、任務類型路由），但**缺量化預期** | **Coocolab**（部分） |
+
+### 兩者的失敗模式剛好相反——這是最值得看的一條
+
+**Coocolab 的失敗模式：看起來有效，但無法知道是否有效。**
+
+它能很快給你一個「今天偏多、關鍵價位在這」的答案，而且說得頭頭是道。
+但那個答案**沒有任何東西能證偽它**——沒有回測、沒有樣本外、沒有成本模型。
+`RESEARCH.md` 誠實承認了這點。而 `scalper-run.js` 是這個失敗模式的終點：
+一組 EMA(8)／RSI(3)／VWAP 規則，未經任何驗證就直接連上 BitGet 實盤下單。
+
+**TrendPoint 的失敗模式：驗證嚴謹，但東西上不了線。**
+
+- spec 012（BOS 量能確認）A 段已實作，**預設關閉**，待 B 段實測 SC-010
+- spec 013（進場閘門）A 段已實作，**預設關閉**，待 B 段實測 SC-014/015
+- spec 014（均線通知）總開關 `alerts.ma_alerts_enabled` **預設關閉**
+- 現貨監控端與回測端刻意不同源，推播訊號從未被回測驗證
+- 本環境 agent proxy 擋掉 yfinance 與 TAIFEX，B 段實測得繞道 `research_b_segment.yml`
+
+**這不是缺陷，是同一套紀律的成本。** 憲章的每一條都在防「被自己騙」，
+而防得住的代價是東西上線慢。但值得意識到目前的形狀：
+repo 累積了多個「已實作但未驗證因此關閉」的功能，
+**B 段實測是這條路上的瓶頸，而瓶頸卡在取數**。
+
+第四節 A 的 5m 評估之所以值錢，正是因為它動的就是這個瓶頸的一種形態——
+用別人的資料管道，解掉自己驗證不了的問題。
+
+### 一句話
+
+**Coocolab 是探索層，TrendPoint 是驗證層。** 原則上互補：
+用前者快速產生假設，用後者判斷假設是否成立。
+
+但這個互補**在本專案被第三節的三條阻擋封死**（授權禁令、headless 環境、
+資料完整性）。所以實務上能取的，只有第四節那幾項一次性用途，
+加上第四節 B 那個與交易完全無關的方法論。
+
+---
+
+## 八、建議行動
 
 **不需要為此開 spec。第四節 B 是唯一建議現在就做的改動，且與此工具無關。**
 
@@ -351,7 +420,7 @@ TradingView session、執行任意 JS。
 
 ---
 
-## 八、本次審查未做到的事（誠實聲明）
+## 九、本次審查未做到的事（誠實聲明）
 
 - **未讀到部落格原文**：`coocolab.com` 被 agent proxy 政策拒絕（403 on CONNECT）。
   事實基礎為其 GitHub repo 的文件。該文若有 repo 以外的原創內容，本報告未涵蓋。
@@ -363,7 +432,10 @@ TradingView session、執行任意 JS。
   `safety-check-log.json` 得出，**未審查 78 個工具的實作**。若要安裝，
   該審查仍須自行進行。
 - **未執行任何回測**：容器內無 `trendpoint.db`，網路政策阻擋行情來源。
-  第二、三、五節對 repo 的判定皆為程式碼與組態的靜態核對，引用附 `檔案:行號`。
+  第二、三、五、七節對 repo 的判定皆為程式碼與組態的靜態核對，引用附 `檔案:行號`。
+- **第七節的比較是「文件對文件、程式碼對程式碼」的靜態對照**，非實測績效比較。
+  兩者無共同標的與共同時間區間可比（Coocolab 無台股支援、亦無績效數據可引），
+  因此該節不含任何績效優劣的宣稱，也不應被讀成「哪一套比較會賺」。
 - **未查證 TradingView 現行 ToU 條文本身**：授權判定引自該 MCP 專案 README
   的自述禁令。若要據此做商業決策，應直接讀 TradingView 官方條款。
 - **未查證台股／台指期在 TradingView 上的資料可得性**：該 repo 文件無相關說明，
