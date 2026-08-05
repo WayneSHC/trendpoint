@@ -49,6 +49,7 @@ spec 012 / 013 的驗收都切成兩段：A 段離線可完成（合成資料即
 """
 
 import argparse
+import hashlib
 import os
 import sys
 from typing import Any, Dict, List, Optional, Tuple
@@ -76,6 +77,13 @@ SCENARIOS: List[Tuple[str, Dict[str, Any], str, bool]] = [
     ("三項全開", {"use_bos_volume": True, "use_dd_gate": True,
                   "use_settlement_gate": True}, "combined", False),
 ]
+
+
+# 封鎖比例達此值即判為「閘門實質停用策略」，不再以 MDD／Calmar 論成敗。
+# 取 0.5 是保守的下限：熔斷機制若封鎖了半數以上的交易日，它已經不是在管理
+# 風險而是在取代策略。實測值遠超此線（TXF 為 98.8%），故本門檻的精確位置
+# 不影響既有結論；它存在的目的是讓「策略被關掉」無法再偽裝成「風險改善」。
+DISABLING_BLOCK_RATIO = 0.5
 
 
 def _expectancy(summary: Dict[str, Any]) -> float:
@@ -234,17 +242,26 @@ def run_scenarios(df: pd.DataFrame, instrument, cfg,
         row = {"label": label, "kind": kind, "skipped": False}
         row.update(evaluate(df, instrument, cfg, eff))
         row.pop("trade_returns", None)
+        # 封鎖**比例**才有判讀意義：6919 根在 7000 根的序列上是「策略被關掉」，
+        # 在 700000 根上則是正常的熔斷。絕對根數看不出這個差別。
+        row["blocked_ratio"] = (row.get("blocked_bars", 0) / len(df)) if len(df) else 0.0
         rows.append(row)
 
     return rows
 
 
 def print_report(ticker: str, instrument, calibration: Dict[str, Any],
-                 rows: List[Dict[str, Any]]) -> None:
+                 rows: List[Dict[str, Any]],
+                 fingerprint: Optional[Dict[str, Any]] = None) -> None:
     kind = "期貨（含空方）" if instrument.asset_class == AssetClass.FUTURES else "現貨"
     print(f"\n{'=' * 96}")
     print(f"B 段實測：{ticker}（{kind}）")
     print("=" * 96)
+
+    if fingerprint:
+        print(f"\n[資料指紋] {fingerprint['table']}｜{fingerprint['rows']} 根｜"
+              f"{fingerprint['start']} ~ {fingerprint['end']}｜sha256:{fingerprint['sha256']}")
+        print("  回填規格時務必一併記錄此指紋——沒有它，數字無從重現亦無從稽核。")
 
     print("\n[spec 013 SC-015] 回撤門檻校準（蒙地卡羅重抽）")
     if not calibration.get("available"):
@@ -290,15 +307,30 @@ def print_report(ticker: str, instrument, calibration: Dict[str, Any],
         signal_line = (f"期望值 {d_exp:+.3%}、PF {d_pf:+.2f}、交易數 {d_trd:+d} → "
                        f"{'期望值改善' if d_exp > 0 else '期望值未改善'}")
 
-        # 閘門一根都沒封鎖時，各項指標差必然全為 0——那是**未測到**，不是未改善。
-        # 把「沒有證據」印成「有證據說沒用」會直接導向相反的決策，故此處不給判定。
+        # 風控閘門有三種結果，不是兩種：
+        #   封鎖 0 根        → **未測到**（不是未改善——把沒有證據印成有證據說沒用，
+        #                      會直接導向相反的決策）
+        #   封鎖絕大多數根數 → **策略被停用**（MDD 當然變好，因為幾乎不再交易；
+        #                      這不是風險管理的成果）
+        #   兩者之間         → 才輪得到 MDD／Calmar 判定
+        #
+        # 中間那類的真實案例：TXF 在 dd_limit=0.20 下封鎖 6919 根、只剩 1 筆交易，
+        # MDD 從 -98.5% 改善到 -22.8%。舊版判為「風險調整後改善」——但那是把
+        # 策略關掉的結果，且回撤閘門在單標的回測中是單向閂鎖（權益跌到谷底後
+        # 空手則權益不再變動，回撤永遠回不到恢復門檻之上），一旦latch 便不再解除。
         blocked = int(r.get("blocked_bars", 0))
+        ratio = float(r.get("blocked_ratio", 0.0))
         if blocked == 0:
             risk_line = ("封鎖 0 根 → **未觸發，無對照數據**"
                          "（本門檻下閘門從未啟動，不得據此判定有效或無效）")
+        elif ratio >= DISABLING_BLOCK_RATIO:
+            risk_line = (f"封鎖 {blocked} 根（{ratio:.1%}）、交易數 {d_trd:+d} → "
+                         f"**閘門實質停用策略，非風險改善**"
+                         f"（MDD {d_mdd:+.2%} 係因幾乎不再交易；"
+                         f"單標的回測中回撤閘門為單向閂鎖，空手後回撤不再回復）")
         else:
-            risk_line = (f"封鎖 {blocked} 根、MDD {d_mdd:+.2%}、Calmar {d_cal:+.2f}、"
-                         f"交易數 {d_trd:+d} → "
+            risk_line = (f"封鎖 {blocked} 根（{ratio:.1%}）、MDD {d_mdd:+.2%}、"
+                         f"Calmar {d_cal:+.2f}、交易數 {d_trd:+d} → "
                          f"{'風險調整後改善' if (d_mdd > 0 or d_cal > 0) else '風險調整後未改善'}")
 
         if kind == "signal":
@@ -319,17 +351,40 @@ def print_report(ticker: str, instrument, calibration: Dict[str, Any],
     print("      需再以 run_walk_forward.py 取樣本外確認；門檻值尤其容易被後見之明挑選。")
 
 
-def load_frame(instrument, db_path: str) -> Optional[pd.DataFrame]:
+def fingerprint(df: pd.DataFrame, table: str) -> Dict[str, Any]:
+    """對**實際餵進回測的資料**取指紋。
+
+    工作流程另有一個對 `data/*.csv` 取雜湊的步驟，但那涵蓋不了真正的風險：
+    匯入失敗的標的根本不會產出 CSV，於是它完全不被記錄——而它在資料庫裡的
+    **舊表照樣被讀取**。B 段 run 30706957226 就是如此：0050.TW 沒有 CSV，
+    walk-forward 卻報出與前一次逐項相同的數字。
+
+    所以指紋必須貼著回測的輸入取，而且與數字印在同一份報告裡：
+    兩份報告對不上時，先比指紋即可區分「策略改了」與「資料變了」。
+    """
+    cols = [c for c in ("open", "high", "low", "close", "volume") if c in df.columns]
+    payload = df[cols].to_csv(float_format="%.17g").encode("utf-8") if cols else b""
+    return {
+        "table": table,
+        "rows": len(df),
+        "start": str(df.index.min()),
+        "end": str(df.index.max()),
+        "sha256": hashlib.sha256(payload).hexdigest()[:16],
+    }
+
+
+def load_frame(instrument, db_path: str) -> Optional[Tuple[pd.DataFrame, Dict[str, Any]]]:
     tf = "daily" if "daily" in instrument.timeframes else instrument.timeframes[0]
+    table = table_name_for(instrument, tf)
     try:
-        df = safe_load_db_data(db_path, table_name_for(instrument, tf))
+        df = safe_load_db_data(db_path, table)
     except Exception as e:
         print(f"  略過 {instrument.id}：讀取資料表失敗（{e}）。")
         return None
     if df is None or df.empty:
         print(f"  略過 {instrument.id}：無資料（請先執行 run_ingestion.py）。")
         return None
-    return df
+    return df, fingerprint(df, table)
 
 
 def run(target: Optional[str] = None, n_sims: int = 5000) -> int:
@@ -350,9 +405,10 @@ def run(target: Optional[str] = None, n_sims: int = 5000) -> int:
 
     evaluated = 0
     for inst in instruments:
-        df = load_frame(inst, db_path)
-        if df is None:
+        loaded = load_frame(inst, db_path)
+        if loaded is None:
             continue
+        df, fp = loaded
         # SC-015 必須早於 SC-014：門檻要先校準，否則對照跑的是形式佔位值
         baseline = evaluate(df, inst, cfg, {})
         calibration = calibrate_dd_limit(baseline, n_sims=n_sims)
@@ -363,7 +419,7 @@ def run(target: Optional[str] = None, n_sims: int = 5000) -> int:
             dd_limit = None
 
         rows = run_scenarios(df, inst, cfg, dd_limit_pct=dd_limit)
-        print_report(inst.id, inst, calibration, rows)
+        print_report(inst.id, inst, calibration, rows, fingerprint=fp)
         evaluated += 1
 
     if evaluated == 0:

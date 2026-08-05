@@ -17,6 +17,7 @@ per-asset-class 離群門檻。
 import os
 import sqlite3
 from datetime import date, timedelta
+from typing import List
 
 import pandas as pd
 
@@ -96,14 +97,26 @@ def _ingest_taifex(inst, tf: str, sys_cfg, db_path: str, adapter) -> None:
           f"轉倉事件 {len(events)} 次）")
 
 
-def run(equity_only: bool = False):
-    """匯入所有 instrument 的所有時框。
+def run(equity_only: bool = False) -> List[str]:
+    """匯入所有 instrument 的所有時框。回傳**失敗項目**清單（空 = 全數成功）。
 
     equity_only=True 時**只處理現貨**，跳過期貨。用途是排程監控的日線預熱
     （見 .github/workflows/alert_scheduler.yml）：TAIFEX 期貨在表空時會觸發
     1998 年起的全歷史回填（每請求節流 2 秒），那是分鐘級以上的重量作業，
     絕不能放進每 30 分鐘一次的排程裡。
+
+    ## 為什麼要回傳失敗清單
+
+    單一標的失敗不該中斷整批（其他標的仍應匯入），所以這裡逐項 catch。
+    但**「印了錯誤訊息後以 0 結束」會讓失敗完全隱形**：CI 步驟顯示成功、
+    快取裡的舊表原封不動，下游回測照樣讀得到資料——只是那份資料屬於
+    上一次執行。B 段 run 30706957226 就這樣發生過：0050.TW 沒有產出 CSV，
+    walk-forward 卻報出與前一次逐項相同的數字。
+
+    呼叫端據此決定退出碼；研究用途必須讓它非零，否則「資料是這次抓的」
+    這個前提無從成立。
     """
+    failures: List[str] = []
     print("=" * 60)
     print("開始執行 TrendPoint 數據抓取任務...")
     if equity_only:
@@ -124,6 +137,7 @@ def run(equity_only: bool = False):
             adapter = get_adapter(inst.source)
         except ValueError as e:
             print(f"  * [錯誤]：{e}，跳過此標的。")
+            failures.append(f"{inst.id}（adapter 解析失敗：{e}）")
             continue
 
         for tf in inst.timeframes:
@@ -134,11 +148,13 @@ def run(equity_only: bool = False):
                     _ingest_taifex(inst, tf, sys_cfg, db_path, adapter)
                 except Exception as e:
                     print(f"  * [錯誤]：taifex 匯入 {inst.id} [{tf}] 失敗：{e}，跳過。")
+                    failures.append(f"{inst.id} [{tf}]（taifex：{e}）")
                 continue
             try:
                 df = adapter.fetch(inst, tf)
             except Exception as e:
                 print(f"  * [錯誤]：取得 {inst.id} [{tf}] 失敗：{e}，跳過。")
+                failures.append(f"{inst.id} [{tf}]（{e}）")
                 continue
 
             print(f"    - 資料筆數: {len(df)}；日期範圍: {df.index.min()} ~ {df.index.max()}")
@@ -160,12 +176,21 @@ def run(equity_only: bool = False):
             save_to_sqlite(df, table_name_for(inst, tf), db_path)
 
     print("\n" + "=" * 60)
-    print("數據抓取與持久化任務執行完畢！")
+    if failures:
+        print(f"數據抓取結束，但有 {len(failures)} 項失敗：")
+        for f in failures:
+            print(f"  ✗ {f}")
+        print("⚠ 失敗標的的資料庫表**維持前一次執行的內容**（若存在）。")
+        print("  下游回測若讀到該表，得到的是舊資料——請勿據此產出研究結論。")
+    else:
+        print("數據抓取與持久化任務執行完畢！")
     print("=" * 60)
+    return failures
 
 
 if __name__ == "__main__":
     import argparse
+    import sys
     from datetime import timedelta as _td
 
     parser = argparse.ArgumentParser(description="TrendPoint 數據抓取")
@@ -175,7 +200,10 @@ if __name__ == "__main__":
                         help="只匯入現貨（跳過期貨）。供排程監控預熱日線表用——"
                              "TAIFEX 表空時會觸發全歷史回填，不適合放進 30 分鐘排程")
     args = parser.parse_args()
-    run(equity_only=args.equity_only)
+    _failures = run(equity_only=args.equity_only)
     if args.verify:
         from verify_futures_data import run_and_report
         run_and_report(date.today() - _td(days=30), date.today())
+    # 任一標的失敗即非零退出：讓 CI 步驟紅掉，而不是留下「成功但用了舊資料」的假象。
+    # alert_scheduler.yml 的預熱步驟帶 continue-on-error，不受影響。
+    sys.exit(1 if _failures else 0)
