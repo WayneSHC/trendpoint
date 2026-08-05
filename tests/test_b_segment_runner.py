@@ -309,3 +309,106 @@ def test_run_scenarios_rows_carry_kind(cfg):
     """實跑產生的列也必須帶 kind（報表判讀靠它）。"""
     rows = bs.run_scenarios(daily_klines(400), EQUITY, cfg)
     assert all("kind" in r for r in rows)
+
+
+# ------------------------------------------------------- 資料指紋（P0 修復）
+
+def test_fingerprint_changes_when_values_change():
+    """指紋必須對**數值**敏感——筆數相同但數值不同是實際發生過的情形。
+
+    yfinance 對相同標的、相同期間會回傳筆數一致而數值有別的資料
+    （auto_adjust 的還原價取決於當下的股利/分割歷史）。只比筆數抓不到。
+    """
+    df = daily_klines(200)
+    a = bs.fingerprint(df, "stock_X_daily")
+
+    tweaked = df.copy()
+    tweaked.iloc[10, tweaked.columns.get_loc("close")] += 0.01
+    b = bs.fingerprint(tweaked, "stock_X_daily")
+
+    assert a["rows"] == b["rows"] == 200, "此 fixture 應維持筆數相同才有鑑別力"
+    assert a["sha256"] != b["sha256"]
+
+
+def test_fingerprint_is_stable_for_identical_data():
+    df = daily_klines(200)
+    assert bs.fingerprint(df, "t")["sha256"] == bs.fingerprint(df.copy(), "t")["sha256"]
+
+
+def test_report_prints_fingerprint(capsys, cfg):
+    """指紋必須與數字印在同一份報告——分開存放等於沒存。"""
+    fp = {"table": "stock_0050_TW_daily", "rows": 2433,
+          "start": "2016-08-01", "end": "2026-07-31", "sha256": "deadbeefdeadbeef"}
+    bs.print_report("0050.TW", EQUITY, {"available": False, "reason": "測試"}, [], fingerprint=fp)
+    out = capsys.readouterr().out
+    assert "stock_0050_TW_daily" in out and "deadbeefdeadbeef" in out and "2433" in out
+
+
+def test_load_frame_returns_fingerprint_of_what_was_read(tmp_path, cfg):
+    """指紋須取自**實際餵進回測的資料表**，而非 data/*.csv。
+
+    匯入失敗的標的不會產出 CSV，卻仍可能被讀到資料庫裡的舊表——
+    對 CSV 取指紋恰好漏掉這個情形（run 30706957226 的 0050.TW）。
+    """
+    from db_security import table_name_for
+    import sqlite3
+
+    df = daily_klines(300)
+    db = tmp_path / "t.db"
+    table = table_name_for(EQUITY, "daily")
+    conn = sqlite3.connect(str(db))
+    try:
+        df.to_sql(table, conn, if_exists="replace")
+    finally:
+        conn.close()
+
+    loaded = bs.load_frame(EQUITY, str(db))
+    assert loaded is not None
+    got_df, fp = loaded
+    assert fp["table"] == table
+    assert fp["rows"] == len(got_df) == 300
+    assert len(fp["sha256"]) == 16
+
+
+# --------------------------------------------- 過度封鎖 = 停用策略（P0 修復）
+
+def _row(label, kind, **kw):
+    base = {"label": label, "kind": kind, "skipped": False, "total_return": 0.10,
+            "max_drawdown": -0.10, "calmar": 1.0, "sharpe": 0.8, "total_trades": 40,
+            "win_rate": 0.5, "profit_factor": 1.5, "expectancy": 0.003}
+    base.update(kw)
+    return base
+
+
+def test_overblocking_gate_is_not_reported_as_risk_improvement(capsys):
+    """封鎖絕大多數根數 → 判為「停用策略」，不得判為「風險調整後改善」。
+
+    真實案例：TXF 在 dd_limit=0.20 下封鎖 6919/7000 根、只剩 1 筆交易，
+    MDD 從 -98.5% 改善到 -22.8%。那不是風險管理的成果，是策略被關掉——
+    且單標的回測中回撤閘門為單向閂鎖，空手後回撤不再回復，一旦觸發即永久。
+    """
+    rows = [
+        _row("基準（三項皆關閉）", "baseline", max_drawdown=-0.985, total_trades=7),
+        _row("啟用回撤閘門", "risk", max_drawdown=-0.228, total_trades=1,
+             blocked_bars=6919, blocked_ratio=0.988),
+    ]
+    bs.print_report("TXF", EQUITY, {"available": False, "reason": "測試"}, rows)
+    out = capsys.readouterr().out
+
+    assert "實質停用策略" in out
+    assert "風險調整後改善" not in out, "策略被關掉被誤報為風險改善"
+    assert "單向閂鎖" in out
+
+
+def test_moderate_blocking_still_gets_a_verdict(capsys):
+    """封鎖比例在合理範圍內時，仍應以 MDD／Calmar 給出判定。"""
+    rows = [
+        _row("基準（三項皆關閉）", "baseline", max_drawdown=-0.20, calmar=0.5),
+        _row("啟用回撤閘門", "risk", max_drawdown=-0.12, calmar=0.9, total_trades=30,
+             blocked_bars=120, blocked_ratio=0.06),
+    ]
+    bs.print_report("TEST", EQUITY, {"available": False, "reason": "測試"}, rows)
+    out = capsys.readouterr().out
+
+    assert "風險調整後改善" in out
+    assert "實質停用策略" not in out
