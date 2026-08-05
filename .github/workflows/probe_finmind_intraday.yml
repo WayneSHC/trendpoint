@@ -1,0 +1,84 @@
+name: TrendPoint - FinMind 盤中資料集探針（手動觸發）
+
+# 一次性查核：FinMind 的 TaiwanStockKBar（台股分 K）與 TaiwanFuturesTick
+# （台指期逐筆）能不能取，以決定 5m 可行性評估要不要往下走。
+#
+# **為什麼需要一個 workflow 而不是本機跑**：與 research_b_segment.yml 同一個
+# 理由——開發容器的 agent proxy 對行情來源回 403（CONNECT 政策拒絕），
+# 但 GitHub runner 可達（alert_scheduler.yml 每 30 分鐘實抓 yfinance 已長期證實）。
+#
+# **背景**：spec 010 spec.md:146 把盤中資料列為範圍外，理由是「無免費歷史」。
+# 本探針就是要驗證那句話在 FinMind 上是否仍然成立。若 KBar/Tick 可取，
+# spec 006 US1（收盤前 15 分鐘強制平倉，SC-001 需 5 分鐘級回測）與
+# docs/reviews/2026-07-30 第五節封存的「真正的盤中系統」都能解封。
+#
+# **本工作流程唯讀**：不寫 DB、不改組態、不產生任何入庫資料。
+# 輸出僅為一份文字報告 artifact，供人工判讀。
+
+on:
+  workflow_dispatch:
+    inputs:
+      stock_id:
+        description: '台股代號（測 TaiwanStockKBar 用）'
+        type: string
+        default: '2330'
+      futures_id:
+        description: '期貨代號（測 TaiwanFuturesTick 用）'
+        type: string
+        default: 'TX'
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    # 約 20 個請求 × 1.2 秒節流，加上 tick 單日十萬筆的傳輸時間。
+    timeout-minutes: 20
+
+    steps:
+      - name: 檢出專案程式碼
+        uses: actions/checkout@v5
+
+      - name: 設定 Python 環境
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      # 刻意不裝 requirements.txt：探針只用到 requests（spec 010 D4 的免 SDK
+      # 原則），裝整套相依只是拖慢一個唯讀查核。
+      - name: 安裝相依套件
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+
+      # 先擋掉「Secret 沒設好」這個最常見的失敗，避免它偽裝成「資料集無權限」。
+      # 只檢查長度，不印出任何內容。
+      - name: 檢查 FINMIND_TOKEN Secret
+        env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+        run: |
+          if [ -z "$FINMIND_TOKEN" ]; then
+            echo "::error::FINMIND_TOKEN Secret 未設定。"
+            echo "請至 Settings → Secrets and variables → Actions → New repository secret，"
+            echo "名稱填 FINMIND_TOKEN。"
+            exit 1
+          fi
+          echo "FINMIND_TOKEN 已設定（長度 ${#FINMIND_TOKEN}）"
+
+      # tee 到檔案：終端輸出會隨 log 保留期限消失，artifact 才是可引用的產物。
+      # 經 env 傳遞輸入而非插值進指令字串（沿用既有 workflow 的慣例）。
+      - name: 執行探針
+        env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+          PROBE_STOCK_ID: ${{ inputs.stock_id }}
+          PROBE_FUTURES_ID: ${{ inputs.futures_id }}
+        run: |
+          mkdir -p artifacts
+          python probe_finmind_intraday.py 2>&1 | tee artifacts/finmind_probe_report.txt
+
+      - name: 上傳探測報告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: finmind-probe-${{ github.run_id }}
+          path: artifacts/
+          retention-days: 30
