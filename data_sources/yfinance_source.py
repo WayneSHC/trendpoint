@@ -14,9 +14,23 @@ from . import register_adapter
 from data_ingestion import fetch_stock_data
 
 # 時框 → interval。日線的 period 來自 config `data.equity_history_period`（憲章 V，
-# 不硬編碼）；5 分線固定 5 天——那是 yfinance 對 5m 的上限，不是可調策略參數。
+# 不硬編碼）；5 分線的 period 是**資料源上限**而非可調策略參數，故不入 config。
+#
+# **2026-08-06 更正**：本處原為 `"5d"`，註解宣稱「那是 yfinance 對 5m 的上限」——
+# 該敘述不正確。Yahoo 對 5m 的回溯上限是 **60 天**；7 天是 `1m` 的限制。
+# 此錯誤前提曾外溢：`docs/reviews/2026-07-30-tradingview-mcp-workflow-review.md`
+# 第五節據「5m 只有約 270 根」判定盤中系統跑不出統計意義並予封存，
+# 而 60 天約 2,160 根（40 交易日 × 54），是原估的 8 倍。
+#
+# 改此常數**不改變任何現行行為**：`equity_instrument` 的 timeframes 僅
+# `["daily"]`（instruments.py:90），`run_ingestion.py:143` 只迴圈宣告的時框，
+# 故 adapter 的 5m 分支目前無呼叫端。它供研究路徑（run_5m_evaluation.py）使用。
+#
+# **監控端不受影響也不應受影響**：`monitor_signals.py:167` 直接呼叫
+# fetch_stock_data(period="5d")、不經本 adapter。盤中提示只需最近數日，
+# 拉長 period 只會增加每 30 分鐘一次輪詢的傳輸量而無收益。
 _INTERVAL = {"daily": "1d", "5m": "5m"}
-_FIVE_MIN_PERIOD = "5d"
+_FIVE_MIN_PERIOD = "60d"
 
 
 class YfinanceAdapter(DataSourceAdapter):
