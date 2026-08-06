@@ -62,6 +62,22 @@ def bootstrap_trades(trade_returns: List[float],
             "warning": "無交易紀錄，無法執行蒙地卡羅重抽。",
         }
 
+    # 輸入契約：逐筆報酬率必須 > -100%。單筆交易虧掉超過投入名目值在數學上
+    # 需要價位翻負，實務不可達；出現此值代表**分母語意壞掉**（典型成因是拿
+    # back-adjust 後的期貨連續價當名目值分母，見 backtester._return_basis_price）。
+    #
+    # 這裡選擇硬失敗而非夾擠：`_equity_path_mdd` 的 cumprod 遇到 <= -1 的報酬會讓
+    # 淨值穿零，回撤算出 -567% 這種不可能的數字並**照常回傳**。校準門檻正是讀
+    # 這個分布，靜默夾擠只會把壞輸入洗成看似合理的門檻。
+    bad = returns <= -1.0
+    if bad.any():
+        n_bad = int(bad.sum())
+        raise ValueError(
+            f"逐筆報酬率序列有 {n_bad} 筆 <= -100%（最小 {returns.min():.4f}），"
+            f"複利淨值路徑會穿零、回撤失去意義。這通常不是策略虧損，而是報酬率"
+            f"分母用錯基準價（期貨須用未調整價；見 spec 011 FR-004）。"
+        )
+
     if n_trades is None:
         n_trades = n_source
 

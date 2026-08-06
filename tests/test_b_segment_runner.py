@@ -169,6 +169,17 @@ def test_calibration_takes_the_deep_tail_not_the_shallow_one():
     assert out["suggested_dd_limit_pct"] > 0.02
 
 
+def test_calibration_reports_contract_violation_without_killing_the_run():
+    """逐筆報酬 <= -100%（分母語意壞掉）不可校準，但不得連坐其他標的。
+
+    函式庫層（bootstrap_trades）硬失敗是對的；批次驅動層必須把它轉成
+    「該檔不可校準 + 原因」，否則一檔壞資料會丟掉整輪已算完的結果。
+    """
+    out = bs.calibrate_dd_limit({"trade_returns": [0.02, -1.4, 0.03]}, n_sims=100)
+    assert out["available"] is False
+    assert "-100%" in out["reason"], "原因須原文轉載，否則現場無從判斷是哪類壞法"
+
+
 def test_calibration_warns_on_small_sample():
     """樣本 < 30 筆時必須帶 warning——那不是蒙地卡羅能補救的問題。"""
     out = bs.calibrate_dd_limit({"trade_returns": [0.01, -0.02, 0.03]}, n_sims=200)
