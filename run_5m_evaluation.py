@@ -216,9 +216,16 @@ def report_signal_density(df: pd.DataFrame, p) -> pd.DataFrame:
     )
 
     n = len(ind)
-    for col, label in [("bos_signal", "BOS（續勢）"),
-                       ("mss_signal", "MSS（反轉）"),
-                       ("regime_ok", "regime_ok（多方市況通過）"),
+    # 結構訊號是三值（+1 看漲 / -1 看跌 / 0 無）。**分方向計**——
+    # 現貨只走多方進場，把兩個方向合計會讓此處與【三之二】的基數對不起來。
+    for col, label in [("bos_signal", "BOS（續勢）"), ("mss_signal", "MSS（反轉）")]:
+        if col not in ind.columns:
+            continue
+        v = ind[col].fillna(0).astype(int)
+        up, dn = int((v == 1).sum()), int((v == -1).sum())
+        print(f"  {label:<24}多 {up:>6,} / 空 {dn:>6,}"
+              f"   （多方占 {up / n * 100:5.2f}%）")
+    for col, label in [("regime_ok", "regime_ok（多方市況通過）"),
                        ("regime_ok_short", "regime_ok_short（空方）")]:
         if col not in ind.columns:
             continue
@@ -245,7 +252,12 @@ def report_filter_attrition(ind: pd.DataFrame) -> None:
     `iloc[i-1]`（backtester.py:298-299）。故此處把 BOS 於索引 k 的訊號與
     索引 k+1 的濾網配對，與引擎逐值一致。
 
-    僅長側（現貨 enable_short 為結構硬邊界）。
+    僅長側 BOS 續勢。這**就是**現貨的全部進場路徑：`enable_short` 對現貨是
+    結構硬邊界，而 MSS 反轉分支需 `mss_reversal_entry=True`（backtester.py:108
+    預設 False，本 runner 不傳）。故本段的「五道全過」即為引擎的候選進場根數。
+
+    候選數 > 實際進場數是正常的——引擎僅在 `not pm.is_active` 時評估進場，
+    持倉期間的候選會被跳過。
     """
     print()
     print("=" * 74)
@@ -323,9 +335,16 @@ def report_backtest(df: pd.DataFrame, cfg, p, info: dict) -> int:
     )
     trades = res.get("trades", pd.DataFrame())
     summary = res.get("summary", {}) or {}
-    n_trades = len(trades)
 
-    print(f"  完成交易筆數        {n_trades:,}")
+    # `trades` 是**逐筆買賣明細**（BUY / SELL_ALL 各一列），不是來回交易數。
+    # 直接取 len() 會把腿數當成交易數、虛報一倍。以「進場」事件計來回。
+    if len(trades) and "event" in trades.columns:
+        n_trades = int(trades["event"].astype(str).str.contains("進場", na=False).sum())
+    else:
+        n_trades = 0
+
+    print(f"  買賣明細列數        {len(trades):,}")
+    print(f"  完成來回交易        {n_trades:,}")
     if n_trades:
         span_days = info["days"]
         print(f"  交易頻率            每 {span_days / n_trades:.1f} 個交易日一筆")
