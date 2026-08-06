@@ -88,6 +88,29 @@ def clean_kline_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     # 重新命名索引為 datetime
     cleaned_df.index.name = "datetime"
     
+    # 非正價格視同缺值：yfinance 對「該根沒有資料」會回傳 0 而非 NaN。
+    # 實例：0050.TW 於 2009-08-13 的 open = 0（high/low/close 皆正常），
+    # 十年窗口不含該根故長期未顯現，改取 max 全歷史後每次匯入必定失敗。
+    #
+    # 這裡刻意**不**新增一套修補政策，而是把它歸入既有的缺值路徑——同一條
+    # ffill 規則、同一份日誌。ffill 只用過去資料，無看前偏誤；語意上也正確：
+    # 「這根沒報價」與「這根缺值」是同一件事。
+    #
+    # 只遮罩 OHLC：**成交量 0 是合法的**（無量交易日），遮罩它會製造假缺值。
+    # 期貨連續序列不經本函式（TAIFEX 走 _ingest_taifex → build_continuous），
+    # 故 back-adjust 造成的合法負價不受影響。
+    _price_cols = [c for c in ("open", "high", "low", "close") if c in cleaned_df.columns]
+    if _price_cols:
+        nonpositive = cleaned_df[_price_cols] <= 0
+        n_nonpositive = int(nonpositive.to_numpy().sum())
+        if n_nonpositive > 0:
+            bad_ts = cleaned_df.index[nonpositive.any(axis=1)]
+            logger.warning(
+                "資料清洗：偵測到 %d 個非正價格（視同缺值處理），影響 %d 根 K 線，"
+                "首見 %s；來源對無資料的根回傳 0 而非 NaN。",
+                n_nonpositive, len(bad_ts), bad_ts[0])
+            cleaned_df[_price_cols] = cleaned_df[_price_cols].mask(nonpositive)
+
     # 缺失值防呆：僅允許前值填補（憲法 VI）；序列開頭的殘留缺值直接剔除，
     # 嚴禁 bfill——向後填補會把未來資料回填至過去（看前偏誤）
     n_missing = int(cleaned_df.isna().any(axis=1).sum())
