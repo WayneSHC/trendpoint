@@ -233,6 +233,75 @@ def report_signal_density(df: pd.DataFrame, p) -> pd.DataFrame:
     return ind
 
 
+def report_filter_attrition(ind: pd.DataFrame) -> None:
+    """進場合取的逐道流失——回答「哪一道濾網是瓶頸」。
+
+    進場需**同時**滿足五道（`ladder_system.check_entry_signal:668-705`）：
+    結構 / 動能 / 趨勢 / 波動 / 全域。訊號多而交易少時，光看訊號數不知道
+    是哪一道把單子殺掉的，本段即為此而存在——它直接決定參數時框化該從
+    哪個參數下手。
+
+    **對齊**：回測引擎在第 i 根判定時，結構訊號取 `iloc[i-2]`、其餘四道取
+    `iloc[i-1]`（backtester.py:298-299）。故此處把 BOS 於索引 k 的訊號與
+    索引 k+1 的濾網配對，與引擎逐值一致。
+
+    僅長側（現貨 enable_short 為結構硬邊界）。
+    """
+    print()
+    print("=" * 74)
+    print("【三之二】進場合取的逐道流失   —— 哪一道是瓶頸")
+    print("=" * 74)
+
+    need = {"daily_open", "vwap", "mid_price", "regime_ok", "atr"}
+    if not need.issubset(ind.columns):
+        print(f"  缺少欄位 {sorted(need - set(ind.columns))}，略過")
+        return
+
+    k = ind.index[:-1][ind["bos_signal"].fillna(0).astype(int).values[:-1] == 1]
+    if len(k) == 0:
+        print("  無 BOS 訊號，無可分析對象")
+        return
+    s = ind.shift(-1).loc[k]        # 判定根（訊號根的下一根）
+
+    atr_ok = s["atr"].notna() & (s["atr"] > 0)
+    checks = {
+        "動能（收陽線）": s["close"] > s["open"],
+        "趨勢（>當日開盤 且 >VWAP）": (s["close"] > s["daily_open"]) & (s["close"] > s["vwap"]),
+        "波動（振幅 > 1.2×ATR）": atr_ok & ((s["high"] - s["low"]) > 1.2 * s["atr"]),
+        "全域（>三關價中值 且 regime_ok）": (s["close"] > s["mid_price"]) & s["regime_ok"].fillna(False).astype(bool),
+    }
+
+    n = len(k)
+    print(f"  BOS 訊號（結構端已通過）  {n:>6,} 根\n")
+
+    # 單道通過率是**順序無關**的量，故歸因以它為準。
+    rates = {name: int(mask.fillna(False).sum()) for name, mask in checks.items()}
+    print(f"  {'單看每一道的通過率':<34}{'通過':>7}{'通過率':>10}")
+    print(f"  {'-' * 62}")
+    for name, c in rates.items():
+        print(f"  {name:<34}{c:>7,}{c / n * 100:>9.1f}%")
+
+    print(f"\n  {'逐道累積（合取）':<34}{'剩餘':>7}{'本道殺掉':>12}")
+    print(f"  {'-' * 62}")
+    cum = pd.Series(True, index=s.index)
+    prev = n
+    for name, mask in checks.items():
+        cum = cum & mask.fillna(False)
+        left = int(cum.sum())
+        print(f"  {name:<34}{left:>7,}{prev - left:>12,}")
+        prev = left
+    print("  （「本道殺掉」隨排列順序而變——合取沒有唯一歸因。歸因請看上表。）")
+
+    final = int(cum.sum())
+    print(f"\n  → 五道全過（可進場根數）  {final:,}")
+
+    bottleneck, passed = min(rates.items(), key=lambda kv: kv[1])
+    print(f"  → **瓶頸：{bottleneck}**——單道通過率僅 {passed / n * 100:.1f}%，"
+          f"為四道中最低")
+    if final == 0:
+        print("\n  ⚠ 合取為 0——交易數 0 的成因在此，不是回測引擎異常。")
+
+
 def report_backtest(df: pd.DataFrame, cfg, p, info: dict) -> int:
     print()
     print("=" * 74)
@@ -368,7 +437,8 @@ def main() -> None:
 
     n_trades = None
     if not args.data_only:
-        report_signal_density(df, p)
+        ind = report_signal_density(df, p)
+        report_filter_attrition(ind)
         n_trades = report_backtest(df, cfg, p, info)
 
     verdict(info, p, n_trades)
