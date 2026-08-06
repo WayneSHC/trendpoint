@@ -26,6 +26,7 @@ from data_ingestion import fetch_stock_data, clean_kline_dataframe
 from data_sources import get_adapter
 from instruments import AssetClass, InstrumentRegistry
 import ladder_system
+import alert_outcomes
 from config import load_config
 
 # 載入設定檔以確保與全域一致
@@ -33,6 +34,151 @@ cfg = load_config()
 DB_PATH = cfg.data.database_path
 # spec 003：迭代全部 instrument（現貨 tickers + 結構化期貨），推播能力多空齊備
 REGISTRY = InstrumentRegistry.from_config(cfg.data.tickers, cfg.data.instruments)
+
+# ---------------------------------------------------------------------------
+# spec 015：推播訊號的事後表現追蹤（觀察層）
+# ---------------------------------------------------------------------------
+
+#: 監控端結構參數的**單一來源**（spec 015 FR-005）。
+#:
+#: 這組值同時餵給 `build_indicator_frame` 與參數識別值——維持兩份會讓「紀錄
+#: 宣稱的參數」與「實際使用的參數」悄悄分歧，而那正是參數識別值存在的理由。
+#: `swing_n` / `volume_mult` 原先未顯式傳入（沿用 `build_indicator_frame` 的
+#: 預設），此處明列：留作隱含值會讓 ladder_system 改預設時，識別值默默說謊。
+#: **值本身與 spec 015 實作前逐字相同**，行為零變更由 SC-001 的基準比對證明。
+MONITOR_STRUCTURE_PARAMS = {
+    "structure_period": 10,
+    "use_fvg": True,
+    "fvg_lookback": 3,
+    "swing_n": 2,
+    "volume_mult": 1.5,
+}
+
+
+class _NullRecorder:
+    """總開關關閉時的空物件——不建立目錄、不讀檔、不寫檔（FR-019／SC-001）。"""
+    enabled = False
+
+    def record(self, *args, **kwargs):
+        pass
+
+    def mark_notified(self, *args, **kwargs):
+        pass
+
+    def flush(self):
+        return 0
+
+
+class _OutcomeRecorder:
+    """
+    本輪偵測的紀錄收集器（spec 015）。
+
+    **記錄時機為「偵測當下」，不是「推播成功後」**（FR-001）：沿用
+    `mark_alert_as_sent` 的時機會讓樣本被通知管道故障汙染——LINE 掛掉那一輪
+    就等於訊號沒發生過。`notified` 另以 `mark_notified()` 補記。
+
+    **故障隔離**（FR-010）：所有方法內部吞掉例外並印一行提示。觀察層的問題
+    絕不能阻斷推播——比照 `init_sent_alerts_db` 的既有風格。
+    """
+    enabled = True
+
+    def __init__(self, log_dir: str, fingerprint: str):
+        self._log_dir = log_dir
+        self._fingerprint = fingerprint
+        self._pending = {}
+
+    def record(self, ticker, bar_time, alert_type, timeframe, bar):
+        try:
+            rec = alert_outcomes.make_record(
+                ticker=ticker, bar_time=bar_time, alert_type=alert_type,
+                timeframe=timeframe, bar=bar,
+                param_fingerprint=self._fingerprint,
+            )
+            key = alert_outcomes.record_key(rec)
+            if key in self._pending:
+                # 同一輪重複偵測 → 保留首筆（含其 notified 狀態）
+                self._pending[key] = alert_outcomes.merge_record(self._pending[key], rec)
+            else:
+                self._pending[key] = rec
+        except Exception as e:
+            print(f"提示：{ticker} 事後表現紀錄收集失敗（{e}），不影響推播。")
+
+    def mark_notified(self, ticker, bar_time, alert_type):
+        try:
+            key = alert_outcomes.make_key(ticker, bar_time, alert_type)
+            if key in self._pending:
+                self._pending[key]["notified"] = True
+        except Exception as e:
+            print(f"提示：{ticker} 事後表現紀錄標記失敗（{e}），不影響推播。")
+
+    def flush(self):
+        """函式尾端一次寫回（單次檔案 I/O，非每分支各寫一次）。"""
+        if not self._pending:
+            return 0
+        try:
+            return alert_outcomes.upsert_records(
+                self._log_dir, list(self._pending.values()))
+        except Exception as e:
+            print(f"提示：事後表現紀錄寫入失敗（{e}），不影響推播。")
+            return 0
+        finally:
+            self._pending = {}
+
+
+def make_outcome_recorder(ticker: str):
+    """
+    依組態建立紀錄器；總開關關閉時回傳空物件（完全不進入本案任何路徑）。
+    """
+    try:
+        conf = cfg.alerts.outcome_tracking
+        if not conf.enabled:
+            return _NullRecorder()
+        _p = cfg.strategy.get_params_for_ticker(ticker)
+        fingerprint = alert_outcomes.build_fingerprint(
+            **MONITOR_STRUCTURE_PARAMS,
+            use_bos_volume=_p.use_bos_volume,
+            bos_volume_mult=_p.bos_volume_mult,
+            bos_volume_period=_p.bos_volume_period,
+        )
+        return _OutcomeRecorder(conf.log_dir, fingerprint)
+    except Exception as e:
+        print(f"提示：事後表現紀錄器建立失敗（{e}），本輪不記錄，不影響推播。")
+        return _NullRecorder()
+
+
+def run_outcome_backfill() -> int:
+    """
+    回填既有紀錄的前瞻結果（FR-011／FR-012）。
+
+    讀取既有日線表（走 `safe_load_db_data`），**不發出任何對外資料請求**——
+    行情資料可重抓，故回填可在任何時間執行、任意次數重跑，不需新排程。
+    """
+    try:
+        conf = cfg.alerts.outcome_tracking
+        if not conf.enabled:
+            return 0
+    except Exception:
+        return 0
+
+    def _daily_loader(ticker, timeframe):
+        from db_security import safe_load_db_data, table_name_for
+        from instruments import equity_instrument
+        inst = REGISTRY.get(ticker) if hasattr(REGISTRY, "get") else None
+        if inst is None:
+            inst = next((i for i in REGISTRY.all() if i.id == ticker), None)
+        if inst is None:
+            inst = equity_instrument(ticker)
+        return safe_load_db_data(DB_PATH, table_name_for(inst, "daily"))
+
+    try:
+        changed = alert_outcomes.backfill(conf.log_dir, conf.horizons, _daily_loader)
+        if changed:
+            print(f"事後表現：回填 {changed} 列。")
+        return changed
+    except Exception as e:
+        print(f"提示：事後表現回填失敗（{e}），不影響推播。")
+        return 0
+
 
 def init_sent_alerts_db(db_path: str):
     """
@@ -190,10 +336,12 @@ def check_new_signals(ticker: str, alert_mgr: AlertManager, instrument=None):
     # **既有的 structure_period=10 / use_fvg=True / fvg_lookback=3 硬編碼保持不動**——
     # 順手把它們也改成走 config 會改變預設行為（config 的 structure_period 與
     # use_fvg 值不同），那是另一案的事（research.md D5）。
+    # spec 015：結構參數改由 MONITOR_STRUCTURE_PARAMS 提供（**值逐字相同**），
+    # 使參數識別值與實際使用的參數共用單一來源；行為零變更由 SC-001 證明。
     _p = cfg.strategy.get_params_for_ticker(ticker)
     df = ladder_system.build_indicator_frame(
-        df, structure_period=10, include_regime=False,
-        use_fvg=True, fvg_lookback=3,
+        df, include_regime=False,
+        **MONITOR_STRUCTURE_PARAMS,
         use_bos_volume=_p.use_bos_volume,
         bos_volume_mult=_p.bos_volume_mult,
         bos_volume_period=_p.bos_volume_period)
@@ -210,23 +358,34 @@ def check_new_signals(ticker: str, alert_mgr: AlertManager, instrument=None):
     latest_time = df.index[latest_idx]
     latest_bar = df.iloc[latest_idx]
     prev_bar = df.iloc[prev_idx]
-    
+
+    # spec 015：本輪的事後表現紀錄收集器。總開關關閉時為空物件，
+    # 下方所有 recorder.* 呼叫皆為 no-op（不建立目錄、不讀寫檔）。
+    recorder = make_outcome_recorder(ticker)
+    tf_label = "daily" if bar_interval >= pd.Timedelta(days=1) else "5m"
+
     # 4. 判定與推播訊號
     # 訊號 A：MSS 結構破壞 (1為多頭突破，-1為空頭突破)
     # 訊號決策採用上一根已關閉 K 線的訊號，防範看前偏誤與訊號飄移
     if latest_bar['mss_signal'] == 1:
         alert_type = "BULLISH_MSS"
+        # spec 015：偵測當下即記錄（**在去重判定之前**，FR-001）
+        recorder.record(ticker, latest_time, alert_type, tf_label, latest_bar)
         if not is_alert_already_sent(ticker, latest_time, alert_type):
             msg = f"<b>【多頭反轉訊號】</b>\n標的: {ticker}\n時間: {latest_time}\n價格: {latest_bar['close']:.2f}\n說明: 偵測到最新 K 線看漲 MSS 結構破壞，大成交量突破前高，趨勢可能反轉向上！\n當前階梯參考價: {latest_bar['ladder']:.2f}"
             if alert_mgr.send_alert(mock_prefix + msg + intraday_note):
                 mark_alert_as_sent(ticker, latest_time, alert_type)
+                recorder.mark_notified(ticker, latest_time, alert_type)
                 
     elif latest_bar['mss_signal'] == -1:
         alert_type = "BEARISH_MSS"
+        # spec 015：偵測當下即記錄（**在去重判定之前**，FR-001）
+        recorder.record(ticker, latest_time, alert_type, tf_label, latest_bar)
         if not is_alert_already_sent(ticker, latest_time, alert_type):
             msg = f"<b>【空頭反轉訊號】</b>\n標的: {ticker}\n時間: {latest_time}\n價格: {latest_bar['close']:.2f}\n說明: 偵測到最新 K 線看跌 MSS 結構破壞，大成交量跌破前低，趨勢可能反向做空！\n當前階梯參考價: {latest_bar['ladder']:.2f}"
             if alert_mgr.send_alert(mock_prefix + msg + intraday_note):
                 mark_alert_as_sent(ticker, latest_time, alert_type)
+                recorder.mark_notified(ticker, latest_time, alert_type)
 
     # 訊號 B：BOS 趨勢延續 (1為多頭強勢突破，-1為空頭強勢突破)
     # spec 012：濾網啟用時，BOS 告警額外要求量能確認——使監控端與回測端對
@@ -234,34 +393,46 @@ def check_new_signals(ticker: str, alert_mgr: AlertManager, instrument=None):
     bos_volume_ok = (not _p.use_bos_volume) or bool(latest_bar.get('bos_volume_ok', True))
     if latest_bar['bos_signal'] == 1 and bos_volume_ok:
         alert_type = "BULLISH_BOS"
+        # spec 015：偵測當下即記錄（**在去重判定之前**，FR-001）
+        recorder.record(ticker, latest_time, alert_type, tf_label, latest_bar)
         if not is_alert_already_sent(ticker, latest_time, alert_type):
             msg = f"<b>【多頭趨勢延續】</b>\n標的: {ticker}\n時間: {latest_time}\n價格: {latest_bar['close']:.2f}\n說明: 偵測到 BOS 結構連續突破，多頭力道持續加強！\n當前階梯參考價: {latest_bar['ladder']:.2f}"
             if alert_mgr.send_alert(mock_prefix + msg + intraday_note):
                 mark_alert_as_sent(ticker, latest_time, alert_type)
+                recorder.mark_notified(ticker, latest_time, alert_type)
                 
     elif latest_bar['bos_signal'] == -1 and bos_volume_ok:
         alert_type = "BEARISH_BOS"
+        # spec 015：偵測當下即記錄（**在去重判定之前**，FR-001）
+        recorder.record(ticker, latest_time, alert_type, tf_label, latest_bar)
         if not is_alert_already_sent(ticker, latest_time, alert_type):
             msg = f"<b>【空頭趨勢延續】</b>\n標的: {ticker}\n時間: {latest_time}\n價格: {latest_bar['close']:.2f}\n說明: 偵測到 BOS 結構連續跌破，空頭趨勢強烈加壓！\n當前階梯參考價: {latest_bar['ladder']:.2f}"
             if alert_mgr.send_alert(mock_prefix + msg + intraday_note):
                 mark_alert_as_sent(ticker, latest_time, alert_type)
+                recorder.mark_notified(ticker, latest_time, alert_type)
 
     # 訊號 C：三關價邊界突破
     # 最新 K 線收盤價突破上關價
     if latest_bar['close'] > latest_bar['upper_price'] and prev_bar['close'] <= prev_bar['upper_price']:
         alert_type = "BREAK_UPPER_BAND"
+        # spec 015：偵測當下即記錄（**在去重判定之前**，FR-001）
+        recorder.record(ticker, latest_time, alert_type, tf_label, latest_bar)
         if not is_alert_already_sent(ticker, latest_time, alert_type):
             msg = f"<b>【突破上關價】</b>\n標的: {ticker}\n時間: {latest_time}\n價格: {latest_bar['close']:.2f}\n說明: 價格收盤強勢站上昨日三關價之上關位 ({latest_bar['upper_price']:.2f})！多頭波段進入強勢區域。"
             if alert_mgr.send_alert(mock_prefix + msg + intraday_note):
                 mark_alert_as_sent(ticker, latest_time, alert_type)
+                recorder.mark_notified(ticker, latest_time, alert_type)
                 
     # 最新 K 線收盤價跌破下關價
     elif latest_bar['close'] < latest_bar['lower_price'] and prev_bar['close'] >= prev_bar['lower_price']:
         alert_type = "BREAK_LOWER_BAND"
+        # spec 015：偵測當下即記錄（**在去重判定之前**，FR-001）
+        recorder.record(ticker, latest_time, alert_type, tf_label, latest_bar)
         if not is_alert_already_sent(ticker, latest_time, alert_type):
             msg = f"<b>【跌破下關價】</b>\n標的: {ticker}\n時間: {latest_time}\n價格: {latest_bar['close']:.2f}\n說明: 價格收盤跌破昨日三關價之下關位 ({latest_bar['lower_price']:.2f})！空頭波段進入弱勢區域。"
             if alert_mgr.send_alert(mock_prefix + msg + intraday_note):
                 mark_alert_as_sent(ticker, latest_time, alert_type)
+                recorder.mark_notified(ticker, latest_time, alert_type)
 
     # 訊號 D（spec 014）：均線觸價通知（月／季／半年／年線）
     # ------------------------------------------------------------------
@@ -273,12 +444,17 @@ def check_new_signals(ticker: str, alert_mgr: AlertManager, instrument=None):
     check_ma_touch_alerts(ticker, alert_mgr, instrument,
                           latest_bar=latest_bar, prev_bar=prev_bar,
                           latest_time=latest_time, is_futures=is_futures,
-                          mock_prefix=mock_prefix, intraday_note=intraday_note)
+                          mock_prefix=mock_prefix, intraday_note=intraday_note,
+                          recorder=recorder)
+
+    # spec 015：本輪紀錄一次寫回（單次檔案 I/O）。總開關關閉時為 no-op。
+    recorder.flush()
 
 
 def check_ma_touch_alerts(ticker, alert_mgr, instrument, *,
                           latest_bar, prev_bar, latest_time,
-                          is_futures: bool, mock_prefix: str, intraday_note: str):
+                          is_futures: bool, mock_prefix: str, intraday_note: str,
+                          recorder=None):
     """
     均線觸價通知（spec 014）：股價向下穿越月／季／半年／年線時推播。
 
@@ -293,6 +469,9 @@ def check_ma_touch_alerts(ticker, alert_mgr, instrument, *,
     均線在同一交易日內是常數，同一天內的多次穿越指的是同一件事。
     **請勿為了「一致」而把兩者統一。**
     """
+    if recorder is None:
+        recorder = _NullRecorder()
+
     periods = cfg.alerts.enabled_periods()
     if not periods:
         return                      # 總開關關閉或四條線全關 → 完全短路，不讀日線表
@@ -338,6 +517,10 @@ def check_ma_touch_alerts(ticker, alert_mgr, instrument, *,
     for name in ma_lines.ordered_line_names({k: periods[k] for k in triggered}):
         ma_value = ma_set[name]
         alert_type = ma_lines.alert_type_for(name)
+        # spec 015：偵測當下即記錄（**在去重判定之前**，FR-001）。
+        # timeframe 標 daily：其 bar_time 為交易日、去重粒度亦為每日一則
+        # （與六種結構告警的每根一則刻意不同，見本函式 docstring）。
+        recorder.record(ticker, trade_date, alert_type, "daily", latest_bar)
         # bar_time 填交易日 → 既有主鍵天然保證「每標的每線每日至多一則」
         if is_alert_already_sent(ticker, trade_date, alert_type):
             continue
@@ -349,6 +532,7 @@ def check_ma_touch_alerts(ticker, alert_mgr, instrument, *,
                f"說明: 股價向下觸及或跌破{label}，請評估後續。")
         if alert_mgr.send_alert(mock_prefix + msg + intraday_note):
             mark_alert_as_sent(ticker, trade_date, alert_type)
+            recorder.mark_notified(ticker, trade_date, alert_type)
 
 
 def report_test_alert_result(alert_mgr, sent: bool) -> int:
@@ -387,10 +571,20 @@ def main():
     parser.add_argument("--test-alert", action="store_true", help="發送一筆測試訊息驗證通知管道配置")
     parser.add_argument("--once", action="store_true", help="僅執行單次訊號檢測，不進行循環輪詢")
     parser.add_argument("--interval", type=int, default=60, help="即時輪詢檢查間隔秒數 (預設 60 秒)")
+    parser.add_argument("--backfill-only", action="store_true",
+                        help="僅回填既有告警紀錄的事後表現（spec 015），不取數、不推播")
     args = parser.parse_args()
 
     # 初始化去重資料表
     init_sent_alerts_db(DB_PATH)
+
+    # spec 015：只回填、不取數、不推播。回填僅讀既有日線表，
+    # 不發出任何對外資料請求（SC-012 的驗收入口）。
+    if args.backfill_only:
+        print("開始回填事後表現紀錄...")
+        changed = run_outcome_backfill()
+        print(f"回填完畢（變更 {changed} 列）。")
+        return
     
     # 建立通知管理器
     alert_mgr = AlertManager()
@@ -408,6 +602,7 @@ def main():
     # 2. 執行單次檢測（spec 003：全 instrument——現貨 + 期貨）
     if args.once:
         print("開始單次實時訊號檢測...")
+        run_outcome_backfill()      # spec 015：輪詢開始時順帶回填（無新排程）
         for inst in REGISTRY.all():
             check_new_signals(inst.id, alert_mgr, instrument=inst)
         print("單次檢測執行完畢。")
@@ -417,6 +612,7 @@ def main():
     print(f"開啟實時監控輪詢中... 檢查間隔: {args.interval} 秒。按 Ctrl+C 結束。")
     try:
         while True:
+            run_outcome_backfill()  # spec 015：每輪開始時順帶回填（無新排程）
             for inst in REGISTRY.all():
                 try:
                     check_new_signals(inst.id, alert_mgr, instrument=inst)

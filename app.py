@@ -618,8 +618,8 @@ if n_trades < 30:
 # =========================================================================
 # 9. 工作區分頁 (Workspace Tabs)
 # =========================================================================
-tab_price, tab_perf, tab_risk, tab_log = st.tabs([
-    "價格與訊號", "績效分析", "風險分析", "交易日誌"
+tab_price, tab_perf, tab_risk, tab_log, tab_outcome = st.tabs([
+    "價格與訊號", "績效分析", "風險分析", "交易日誌", "訊號事後表現"
 ])
 
 PLOT_LAYOUT = dict(
@@ -990,3 +990,94 @@ with tab_log:
             )
     else:
         st.info("此回測設定下未觸發任何交易進場。請試著調整參數、放寬市況濾網或更換標的。")
+
+# ── 9.5 訊號事後表現（spec 015 A 段，唯讀）────────────────────
+# **這一頁呈現的不是策略績效。** 它是「推播出去的訊號，事後價格怎麼走」的
+# 原始觀察樣本：無成本模型、無出場規則、未經樣本外驗證，且基準價（告警當下
+# 收盤）與衡量價（日線收盤）時基不同。故本頁**刻意不呈現任何回測 KPI 欄位**，
+# 也不與績效分頁的數字並列——並列本身就是一種宣稱（spec 015 FR-017／SC-016）。
+#
+# UI 只負責呈現：分群統計一律走 alert_outcomes.summarize()（CLAUDE.md UI 規則）。
+with tab_outcome:
+    import alert_outcomes
+
+    _ot = cfg.alerts.outcome_tracking
+    st.caption(
+        "⚠️ **本頁不是策略績效。** 這是推播訊號的事後價格變化觀察樣本——"
+        "不含手續費／交易稅／滑價，無出場規則，未經樣本外驗證，"
+        "且基準價與衡量價時基不同。**不可與「績效分析」分頁的數字相提並論。**"
+    )
+
+    if not _ot.enabled:
+        st.info(
+            "事後表現追蹤目前為**關閉**狀態（預設）。\n\n"
+            "於 `config/config.yaml` 將 `alerts.outcome_tracking.enabled` 設為 `true` "
+            "後，監控每偵測到一則告警就會落一列紀錄；日線視窗（T+1／T+3／T+5）"
+            "會在後續輪詢中自動回填。\n\n"
+            "樣本需要時間累積——這是前瞻性紀錄，無法回溯補齊。"
+        )
+    else:
+        _records = alert_outcomes.load_all(_ot.log_dir)
+        if not _records:
+            st.info(
+                f"尚無紀錄（`{_ot.log_dir}/` 為空）。開關已開啟，"
+                "下一次監控偵測到告警時就會開始累積。"
+            )
+        else:
+            _c1, _c2 = st.columns(2)
+            with _c1:
+                _tfs = ["（全部）"] + sorted(
+                    {r.get("timeframe") for r in _records if r.get("timeframe")})
+                _tf = st.selectbox("資料時框", _tfs, index=0)
+            with _c2:
+                _fps = ["（全部）"] + sorted(
+                    {r.get("param_fingerprint") for r in _records
+                     if r.get("param_fingerprint")})
+                _fp = st.selectbox("參數識別值", _fps, index=0)
+
+            _summary = alert_outcomes.summarize(
+                _records,
+                min_samples=_ot.min_samples,
+                horizons=_ot.horizons,
+                param_fingerprint=None if _fp.startswith("（") else _fp,
+                timeframe=None if _tf.startswith("（") else _tf,
+            )
+
+            st.markdown(
+                f"##### 依告警類型分群（樣本量門檻 {_ot.min_samples}；"
+                f"報酬為**方向調整後**，空方下跌計為正）"
+            )
+            if _summary.empty:
+                st.info("此篩選條件下無紀錄。")
+            else:
+                _display = _summary.copy()
+                _rename = {
+                    "alert_type": "告警類型", "timeframe": "時框",
+                    "direction": "方向", "n_alerts": "偵測數", "n_notified": "已推播",
+                }
+                for _n in _ot.horizons:
+                    # 樣本不足的群**仍然列出**（FR-018）——靜默丟棄會讓使用者
+                    # 誤以為該組合沒有告警，而事實是有告警但還不夠判讀
+                    _display[f"t{_n}_median_adj"] = [
+                        "樣本不足" if not _s else (f"{_v:+.2%}" if _v is not None else "—")
+                        for _s, _v in zip(_display[f"t{_n}_sufficient"],
+                                          _display[f"t{_n}_median_adj"])
+                    ]
+                    _display[f"t{_n}_win_rate"] = [
+                        "樣本不足" if not _s else (f"{_v:.0%}" if _v is not None else "—")
+                        for _s, _v in zip(_display[f"t{_n}_sufficient"],
+                                          _display[f"t{_n}_win_rate"])
+                    ]
+                    _display = _display.drop(columns=[f"t{_n}_sufficient"])
+                    _rename[f"t{_n}_n"] = f"T+{_n} 已回填"
+                    _rename[f"t{_n}_median_adj"] = f"T+{_n} 中位數"
+                    _rename[f"t{_n}_win_rate"] = f"T+{_n} 正報酬比例"
+                _display = _display.rename(columns=_rename)
+                st.dataframe(_display, width='stretch', hide_index=True)
+
+            st.caption(
+                f"紀錄來源：`{_ot.log_dir}/`（JSONL 月分片，隨版本庫保存）。"
+                f"共 {len(_records)} 筆偵測紀錄。"
+                "「已回填」少於「偵測數」代表該視窗尚未到期或資料缺漏——"
+                "**未回填不等於報酬為零**。"
+            )

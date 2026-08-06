@@ -1,0 +1,63 @@
+{
+  "_comment": "spec 015 T002：本案實作前的既有七種告警產出，SC-001 的比對來源。以 tests/ma_fixtures 之合成資料、monitor_signals.check_new_signals 執行所得。涵蓋結構告警與均線告警兩條路徑。請勿手動編輯。",
+  "baseline_commit": "471e94b805f7d7c6dbac6485391404310108ce75",
+  "ticker": "TEST.TW",
+  "scenarios": [
+    {
+      "scenario": "structural_trending",
+      "sent_alerts": [
+        {
+          "ticker": "TEST.TW",
+          "bar_time": "2026-06-03 13:25:00",
+          "alert_type": "BULLISH_BOS"
+        }
+      ],
+      "messages": [
+        "<b>【多頭趨勢延續】</b>\n標的: TEST.TW\n時間: 2026-06-03 13:25:00\n價格: 180.50\n說明: 偵測到 BOS 結構連續突破，多頭力道持續加強！\n當前階梯參考價: 180.50\n\n※ 盤中提示，非回測驗證訊號（監控走盤中時框與硬編碼結構參數；回測走日線與 config 參數）。"
+      ]
+    },
+    {
+      "scenario": "ma_cross_below",
+      "sent_alerts": [
+        {
+          "ticker": "TEST.TW",
+          "bar_time": "2026-06-02 13:25:00",
+          "alert_type": "BEARISH_BOS"
+        },
+        {
+          "ticker": "TEST.TW",
+          "bar_time": "2026-06-02 13:25:00",
+          "alert_type": "BREAK_LOWER_BAND"
+        },
+        {
+          "ticker": "TEST.TW",
+          "bar_time": "2026-06-02",
+          "alert_type": "MA_CROSS_BELOW_HALF_YEARLY"
+        },
+        {
+          "ticker": "TEST.TW",
+          "bar_time": "2026-06-02",
+          "alert_type": "MA_CROSS_BELOW_MONTHLY"
+        },
+        {
+          "ticker": "TEST.TW",
+          "bar_time": "2026-06-02",
+          "alert_type": "MA_CROSS_BELOW_QUARTERLY"
+        },
+        {
+          "ticker": "TEST.TW",
+          "bar_time": "2026-06-02",
+          "alert_type": "MA_CROSS_BELOW_YEARLY"
+        }
+      ],
+      "messages": [
+        "<b>【空頭趨勢延續】</b>\n標的: TEST.TW\n時間: 2026-06-02 13:25:00\n價格: 95.00\n說明: 偵測到 BOS 結構連續跌破，空頭趨勢強烈加壓！\n當前階梯參考價: 95.00\n\n※ 盤中提示，非回測驗證訊號（監控走盤中時框與硬編碼結構參數；回測走日線與 config 參數）。",
+        "<b>【跌破下關價】</b>\n標的: TEST.TW\n時間: 2026-06-02 13:25:00\n價格: 95.00\n說明: 價格收盤跌破昨日三關價之下關位 (104.98)！空頭波段進入弱勢區域。\n\n※ 盤中提示，非回測驗證訊號（監控走盤中時框與硬編碼結構參數；回測走日線與 config 參數）。",
+        "<b>【跌破月線】</b>\n標的: TEST.TW\n時間: 2026-06-02 13:25:00\n價格: 95.00\n月線 (20 日): 100.00\n乖離: -5.00%\n說明: 股價向下觸及或跌破月線，請評估後續。\n\n※ 盤中提示，非回測驗證訊號（監控走盤中時框與硬編碼結構參數；回測走日線與 config 參數）。",
+        "<b>【跌破季線】</b>\n標的: TEST.TW\n時間: 2026-06-02 13:25:00\n價格: 95.00\n季線 (60 日): 100.00\n乖離: -5.00%\n說明: 股價向下觸及或跌破季線，請評估後續。\n\n※ 盤中提示，非回測驗證訊號（監控走盤中時框與硬編碼結構參數；回測走日線與 config 參數）。",
+        "<b>【跌破半年線】</b>\n標的: TEST.TW\n時間: 2026-06-02 13:25:00\n價格: 95.00\n半年線 (120 日): 100.00\n乖離: -5.00%\n說明: 股價向下觸及或跌破半年線，請評估後續。\n\n※ 盤中提示，非回測驗證訊號（監控走盤中時框與硬編碼結構參數；回測走日線與 config 參數）。",
+        "<b>【跌破年線】</b>\n標的: TEST.TW\n時間: 2026-06-02 13:25:00\n價格: 95.00\n年線 (240 日): 100.00\n乖離: -5.00%\n說明: 股價向下觸及或跌破年線，請評估後續。\n\n※ 盤中提示，非回測驗證訊號（監控走盤中時框與硬編碼結構參數；回測走日線與 config 參數）。"
+      ]
+    }
+  ]
+}

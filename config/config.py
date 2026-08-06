@@ -383,6 +383,59 @@ class MaLineConfig(BaseModel):
     )
 
 
+class OutcomeTrackingConfig(BaseModel):
+    """
+    推播訊號的事後表現追蹤（spec 015 A 段）。
+
+    **這是觀察層設定，不是策略參數**——與 `MaAlertConfig` 同一判準：不進回測、
+    不影響任何訊號、不該被 optimizer 掃描。
+
+    **本區塊產出的數字不是策略績效**：無成本模型、無出場規則、未經樣本外驗證
+    （spec FR-017）。呈現端必須標示，且不得與回測 KPI 並列。
+    """
+    enabled: bool = Field(
+        default=False,
+        description="總開關。**預設關閉**——關閉時逐筆、逐則、逐欄與本案實作前相同"
+    )
+    log_dir: str = Field(
+        default="alert_log",
+        description="JSONL 紀錄目錄（月分片）。**不得置於 data/ 之下**——該目錄整體 gitignored"
+    )
+    horizons: List[int] = Field(
+        default_factory=lambda: [1, 3, 5],
+        description="前瞻視窗（交易日）。T+N 為日線表中日期嚴格大於告警日的第 N 根"
+    )
+    min_samples: int = Field(
+        default=20,
+        ge=1,
+        description="分群樣本數低於此值時標示為樣本不足，不顯示統計量（FR-018）"
+    )
+
+    @model_validator(mode="after")
+    def _validate(self) -> "OutcomeTrackingConfig":
+        if not self.horizons:
+            raise ValueError("outcome_tracking.horizons 不得為空")
+        if any(h < 1 for h in self.horizons):
+            raise ValueError(f"outcome_tracking.horizons 必須皆為正整數：{self.horizons}")
+        if list(self.horizons) != sorted(set(self.horizons)):
+            raise ValueError(
+                f"outcome_tracking.horizons 必須嚴格遞增且不重複：{self.horizons}"
+            )
+        cleaned = self.log_dir.strip()
+        if not cleaned:
+            raise ValueError("outcome_tracking.log_dir 不得為空")
+        # 落入 data/ 會被 .gitignore 吞掉（該目錄整體忽略，理由為市場資料再散布
+        # 疑慮）——紀錄將靜默不進版本庫，FR-008 的持久性保證隨之失效。
+        # 這是「看起來能跑、實際上樣本無聲消失」的失效模式，故 fail-fast。
+        normalized = cleaned.replace("\\", "/").lstrip("./")
+        if normalized == "data" or normalized.startswith("data/"):
+            raise ValueError(
+                f"outcome_tracking.log_dir 不得位於 data/ 之下（得到 '{self.log_dir}'）："
+                "該目錄整體被 .gitignore，紀錄會靜默不進版本庫"
+            )
+        return self
+
+
 class MaAlertConfig(BaseModel):
     """
     均線觸價通知設定（spec 014）。
@@ -407,6 +460,11 @@ class MaAlertConfig(BaseModel):
     )
     yearly: MaLineConfig = Field(
         default_factory=lambda: MaLineConfig(period=240), description="年線"
+    )
+    # spec 015：推播訊號的事後表現追蹤（觀察層，與通知偏好同層、與策略參數分離）
+    outcome_tracking: OutcomeTrackingConfig = Field(
+        default_factory=OutcomeTrackingConfig,
+        description="推播訊號的事後表現追蹤（spec 015 A 段，預設關閉）"
     )
 
     def enabled_periods(self) -> Dict[str, int]:

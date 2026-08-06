@@ -85,7 +85,20 @@ python monitor_signals.py --once   # 單次訊號檢測與推播
   時基刻意混合：均線取 DB 日線（年線需 240 根日線，5 分線算不出來）、
   比較價取 5 分線已收盤棒；兩條資料路徑**並存**，改動任一端前先讀
   `specs/014-ma-touch-alerts/research.md` D1。總開關 `alerts.ma_alerts_enabled`
-  預設關閉。此案是 `stock_*_daily` 在監控端的第一個消費者
+  預設關閉。此案是 `stock_*_daily` 在監控端的第一個消費者。
+  **訊號事後表現追蹤**（spec 015 A 段）：`alert_outcomes.py`（觀察層純函式＋
+  JSONL 儲存層）＋ `alert_log/YYYY-MM.jsonl`（**進版本庫**，不可再生成之原始觀察，
+  故不 gitignore）。偵測當下即落一列（**在去重判定之前**——沿用
+  `mark_alert_as_sent` 的時機會讓推播失敗的訊號永不被記錄），另以 `notified`
+  欄分離「訊號成立」與「使用者收到」；事後回填 T+1/T+3/T+5 日線收盤報酬。
+  三條紅線：(1) **產出不是策略績效**——無成本、無出場規則、未經樣本外驗證，
+  UI 禁與回測 KPI 並列；(2) **不新增 SQLite 表**，`db_security` 的
+  `TABLE_NAME_PATTERN` 不得為本案放寬（出現此念頭即代表偏離設計）；
+  (3) **永不進訊號鏈**——它持有告警發生之後的價格，任何回測/訊號模組 import
+  即未來函數入口，由 `tests/test_alert_outcomes.py` 靜態零引用檢查焊死。
+  監控端結構參數的單一來源為 `monitor_signals.MONITOR_STRUCTURE_PARAMS`
+  （同時餵 `build_indicator_frame` 與參數識別值，分兩份會讓紀錄悄悄說謊）。
+  總開關 `alerts.outcome_tracking.enabled` 預設關閉
 - UI：`app.py`（Streamlit，禁止內嵌演算法邏輯）
 - 規格：`specs/001` 為 as-built 基準；`002`（FVG 確認）已併入 main；
   `007`（MSS fractal 反轉進場）已併入 main（SC-003 未達成如實記錄），短腿由 003 解封；
@@ -102,7 +115,12 @@ python monitor_signals.py --once   # 單次訊號檢測與推播
   不 fallback，故所有期貨來源（含 mock）皆須產出該欄位；
   `014`（均線觸價通知，`specs/014-ma-touch-alerts`）已實作——月/季/半年/年線
   向下穿越推播（總開關預設關閉）＋儀表板均線現況表；通知層功能、不進訊號路徑，
-  故無回測對照需求。`013`（進場閘門：回撤上限＋結算日封鎖，
+  故無回測對照需求。`015`（推播訊號的事後表現追蹤，
+  `specs/015-alert-outcome-tracking`）**A 段已實作**——觀察層，總開關預設關閉，
+  關閉時逐筆逐則與實作前相同（基準凍結於 `tests/fixtures_015_baseline_alerts.json`）；
+  解開 2026-07-30 審查的死結（盤中推播**回溯**驗證不可行，但**前瞻累積**可行）。
+  B 段（5 分粒度短視窗）未做。**在 SC-022 實跑量測告警頻率之前，不得宣稱本案
+  「證明了訊號有效」**——樣本頻率未經量化是本案已知的最大不確定性。`013`（進場閘門：回撤上限＋結算日封鎖，
   `specs/013-entry-gate-risk-limits`）**A 段已實作**——兩道閘門**預設關閉**，
   關閉時逐筆、逐根、逐欄與實作前相同（基準凍結於 `tests/fixtures/013_baseline_*`）；
   是否改為預設啟用需 B 段真實資料實測（SC-014/015），未完成前**不得**宣稱本案
