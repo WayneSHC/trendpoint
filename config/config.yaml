@@ -124,6 +124,14 @@ alerts:
   yearly:
     enabled: true
     period: 240
+  # spec 015：推播訊號的事後表現追蹤（A 段）。觀察層——不進訊號或回測路徑。
+  # 產出為原始價格變化的觀察樣本，**不是策略績效**（無成本、無出場規則、
+  # 未經樣本外驗證），呈現端不得與回測 KPI 並列。
+  outcome_tracking:
+    enabled: false          # 總開關，預設關閉；關閉時行為與實作前逐筆相同
+    log_dir: "alert_log"    # JSONL 月分片目錄。**不得**置於 data/ 之下（該目錄整體 gitignored）
+    horizons: [1, 3, 5]     # 前瞻視窗（交易日）
+    min_samples: 20         # 低於此樣本數的分群標示為不足，不顯示統計量
 trading_cost:
   commission_rate: 0.001425
   slip_rate: 0.0005

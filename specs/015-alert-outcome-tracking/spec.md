@@ -4,7 +4,9 @@
 
 **Created**: 2026-08-05
 
-**Status**: Draft
+**Status**: Implemented（2026-08-06，A 段 SC-001~021 全數通過，`pytest -q` 455 passed／1 skipped；
+SC-022／SC-023 為 `[MANUAL]`，待使用者於本機開啟開關實跑累積——見 tasks.md T030／T031。
+**在 SC-022 完成前，本案僅代表「基礎設施已就緒且對既有行為零影響」，不得引申為訊號有效性的任何結論**）
 
 **Input**: User description: "推播訊號的事後表現追蹤（Alert Outcome Tracking）。目的：
 TrendPoint 目前推播出去的訊號，系統不記得後來發生了什麼——`sent_alerts` 只有四欄去重鍵，

@@ -13,6 +13,12 @@ on:
         options: [once, test-alert]
         default: once
 
+# spec 015：事後表現紀錄（alert_log/）須 commit 回版本庫——排程環境的
+# trendpoint.db 存活於 actions/cache（有逐出機制），紀錄一旦遺失不可再生成。
+# 現行預設權限為唯讀，故顯式宣告；範圍僅 contents，不擴及其他。
+permissions:
+  contents: write
+
 jobs:
   run-monitor:
     runs-on: ubuntu-latest
@@ -77,3 +83,32 @@ jobs:
           else
             python monitor_signals.py --once
           fi
+
+      # spec 015：僅在 alert_log/ 確有變更時提交。訊號稀疏，多數輪次為 no-op
+      # （upsert 的「零變更即零寫入」保證連 mtime 都不動），故這一步大部分時間
+      # 什麼也不做，不會產生雜訊 commit。
+      #
+      # [skip ci] 是必要的：否則每則告警的 commit 都會觸發 tests.yml，
+      # 把 Actions 配額耗在對純資料變更跑測試上。
+      #
+      # 失敗不阻斷推播（FR-010）：本步驟位於推播之後，且 continue-on-error。
+      # 未提交的列留待下輪一併提交——upsert 冪等，重覆提交無害。
+      - name: 提交事後表現紀錄
+        continue-on-error: true
+        run: |
+          if [ -z "$(git status --porcelain alert_log/ 2>/dev/null)" ]; then
+            echo "alert_log/ 無變更，略過提交。"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add alert_log/
+          git commit -m "chore(alert-log): 事後表現紀錄自動更新 [skip ci]"
+          for i in 1 2 3; do
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}" && \
+              git push origin "HEAD:${GITHUB_REF_NAME}" && exit 0
+            echo "提交失敗，第 $i 次重試..."
+            sleep $((i * 5))
+          done
+          echo "提交仍失敗——本輪紀錄留待下輪一併提交（upsert 冪等）。"
+          exit 1
