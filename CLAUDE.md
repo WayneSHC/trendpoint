@@ -19,8 +19,18 @@ Streamlit 儀表板，可回測/尋優/即時推播。Python 3.10+，pandas/nump
 1. **路徑加引號**：repo 路徑含中文與空格。Bash 中任何路徑一律用雙引號包住；
    檔案操作優先用 Read/Edit/Write/Grep/Glob 工具，不用 cat/sed/echo 重導向。
 2. **指揮官不下場**：大量讀取（>2 個整檔）、掃 repo、查網頁、批次改檔，
-   一律派 subagent，主對話只收結論與 `檔案:行號`。大檔（`app.py` 49KB、
-   `docs/ladder-optimization-research.md`）先 Grep 定位、再用 offset/limit 讀區段。
+   一律派 subagent，主對話只收結論與 `檔案:行號`。
+   **讀之前先看規模**——常讀檔的行數如下（2026-08-06 實測，會漂移，取數量級即可）：
+
+   | 讀法 | 檔案（行數） |
+   |---|---|
+   | **必先 Grep 定位、再 offset/limit 讀區段**（≥500 行） | `app.py` 992、`ladder_system.py` 809、`backtester.py` 793、`portfolio_backtester.py` 597、`config/config.py` 513 |
+   | **可讀整檔，但別連讀多個**（200–500 行） | `run_b_segment.py` 499、`monitor_signals.py` 432、`walk_forward.py` 323、`docs/ladder-optimization-research.md` 240、`data_ingestion.py` 227、`trading_costs.py` 204 |
+   | **整檔可讀**（<200 行） | `performance.py` 195、`optimizer.py` 186、`risk_gates.py` 126、`instruments.py` 116、`three_bands_theory.md` 82 |
+
+   真正的制約是**單次工具輸出的大小**，不是檔案數或工具數——讀一個 800 行的檔
+   與讀四個 200 行的檔成本相同。故「>2 個整檔就派 subagent」是行數的近似規則，
+   遇到上表第一列的檔案，**讀一個就該考慮派**。
 3. **交易邏輯三條紅線**（來自 `.specify/memory/constitution.md`，完整版看該檔）：
    - 看前偏誤：rolling 結構計算必須 `.shift(1)`；第 N 根出訊號、第 N+1 根開盤成交；
      新訊號必須在 `tests/test_lookahead_bias.py` 加防禦測試。
