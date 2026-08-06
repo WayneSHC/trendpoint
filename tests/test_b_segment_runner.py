@@ -412,3 +412,64 @@ def test_moderate_blocking_still_gets_a_verdict(capsys):
 
     assert "風險調整後改善" in out
     assert "實質停用策略" not in out
+
+
+# ------------------------------------------------- 保證金死亡 / 槓桿（P1）
+
+def test_report_surfaces_effective_leverage(capsys):
+    """期貨報告必須印出名目槓桿——它由組態直接決定，且參數名稱會誤導。
+
+    `margin_utilization: 0.5` 讀起來像「只動用一半資金」，實際是
+    0.5 / 0.055 = 9.09× 名目槓桿，指數反向 11% 即歸零。
+    """
+    bs.print_report("TXF", TXF, {"available": False, "reason": "測試"}, [], leverage=9.09)
+    out = capsys.readouterr().out
+    assert "9.09×" in out
+    assert "11.0%" in out, "須換算成『反向多少即歸零』——倍數本身對讀者不夠具體"
+    assert "槓桿設定" in out, "高槓桿下須明示結果反映的是槓桿而非策略"
+
+
+def test_low_leverage_does_not_trigger_the_warning(capsys):
+    bs.print_report("TXF", TXF, {"available": False, "reason": "測試"}, [], leverage=2.0)
+    out = capsys.readouterr().out
+    assert "2.00×" in out
+    assert "槓桿設定" not in out
+
+
+def test_margin_dead_baseline_refuses_to_judge(capsys):
+    """基準已保證金死亡時不得判讀——交易筆數反映的是「帳戶何時沒錢」。
+
+    TXF 實測：權益剩 2.3%，而 TXF@20,000 每口保證金 220,000，連一口都下不起。
+    此時「啟用某功能後交易數 -6」講的是帳戶餘額，不是濾網效果。
+    """
+    rows = [
+        _row("基準（三項皆關閉）", "baseline", total_return=-0.9769,
+             max_drawdown=-0.985, total_trades=7, margin_dead=True),
+        _row("啟用 BOS 量能確認", "signal", total_return=-0.9220,
+             max_drawdown=-0.9473, total_trades=5, expectancy=-0.131),
+    ]
+    bs.print_report("TXF", TXF, {"available": False, "reason": "測試"}, rows)
+    out = capsys.readouterr().out
+
+    assert "保證金死亡" in out
+    assert "不進行判讀" in out
+    assert "期望值改善" not in out, "基準已死仍給出濾網判定"
+
+
+def test_margin_dead_is_flagged_even_when_baseline_survives(capsys):
+    """非基準列死亡時仍須標示，但判讀照常進行。"""
+    rows = [
+        _row("基準（三項皆關閉）", "baseline"),
+        _row("啟用回撤閘門", "risk", total_trades=1, blocked_bars=50,
+             blocked_ratio=0.02, margin_dead=True, max_drawdown=-0.05, calmar=1.4),
+    ]
+    bs.print_report("TEST", TXF, {"available": False, "reason": "測試"}, rows)
+    out = capsys.readouterr().out
+    assert "保證金死亡" in out and "啟用回撤閘門" in out
+    assert "不進行判讀" not in out
+
+
+def test_margin_dead_never_set_for_equity(cfg):
+    """現貨無保證金概念，此旗標恆為 False。"""
+    rows = bs.run_scenarios(daily_klines(400), EQUITY, cfg)
+    assert all(r.get("margin_dead") is False for r in rows if not r.get("skipped"))
