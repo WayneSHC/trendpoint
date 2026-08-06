@@ -412,3 +412,97 @@ def test_moderate_blocking_still_gets_a_verdict(capsys):
 
     assert "風險調整後改善" in out
     assert "實質停用策略" not in out
+
+
+# ------------------------------------------------- 保證金死亡 / 槓桿（P1）
+
+def test_report_surfaces_effective_leverage(capsys):
+    """期貨報告必須印出名目槓桿——它由組態直接決定，且參數名稱會誤導。
+
+    `margin_utilization: 0.5` 讀起來像「只動用一半資金」，實際是
+    0.5 / 0.055 = 9.09× 名目槓桿，指數反向 11% 即歸零。
+    """
+    bs.print_report("TXF", TXF, {"available": False, "reason": "測試"}, [], leverage=9.09)
+    out = capsys.readouterr().out
+    assert "9.09×" in out
+    assert "11.0%" in out, "須換算成『反向多少即歸零』——倍數本身對讀者不夠具體"
+    assert "槓桿設定" in out, "高槓桿下須明示結果反映的是槓桿而非策略"
+
+
+def test_low_leverage_does_not_trigger_the_warning(capsys):
+    bs.print_report("TXF", TXF, {"available": False, "reason": "測試"}, [], leverage=2.0)
+    out = capsys.readouterr().out
+    assert "2.00×" in out
+    assert "槓桿設定" not in out
+
+
+def test_margin_dead_baseline_refuses_to_judge(capsys):
+    """基準已保證金死亡時不得判讀——交易筆數反映的是「帳戶何時沒錢」。
+
+    TXF 實測：權益剩 2.3%，而 TXF@20,000 每口保證金 220,000，連一口都下不起。
+    此時「啟用某功能後交易數 -6」講的是帳戶餘額，不是濾網效果。
+    """
+    rows = [
+        _row("基準（三項皆關閉）", "baseline", total_return=-0.9769,
+             max_drawdown=-0.985, total_trades=7, margin_dead=True),
+        _row("啟用 BOS 量能確認", "signal", total_return=-0.9220,
+             max_drawdown=-0.9473, total_trades=5, expectancy=-0.131),
+    ]
+    bs.print_report("TXF", TXF, {"available": False, "reason": "測試"}, rows)
+    out = capsys.readouterr().out
+
+    assert "保證金死亡" in out
+    assert "不進行判讀" in out
+    assert "期望值改善" not in out, "基準已死仍給出濾網判定"
+
+
+def test_margin_dead_is_flagged_even_when_baseline_survives(capsys):
+    """非基準列死亡時仍須標示，但判讀照常進行。"""
+    rows = [
+        _row("基準（三項皆關閉）", "baseline"),
+        _row("啟用回撤閘門", "risk", total_trades=1, blocked_bars=50,
+             blocked_ratio=0.02, margin_dead=True, max_drawdown=-0.05, calmar=1.4),
+    ]
+    bs.print_report("TEST", TXF, {"available": False, "reason": "測試"}, rows)
+    out = capsys.readouterr().out
+    assert "保證金死亡" in out and "啟用回撤閘門" in out
+    assert "不進行判讀" not in out
+
+
+def test_margin_dead_never_set_for_equity(cfg):
+    """現貨無保證金概念，此旗標恆為 False。"""
+    rows = bs.run_scenarios(daily_klines(400), EQUITY, cfg)
+    assert all(r.get("margin_dead") is False for r in rows if not r.get("skipped"))
+
+
+def test_futures_capital_can_afford_a_lot_at_configured_leverage():
+    """期貨資本與槓桿被合約規格綁死，組態必須讓至少 1 口下得起。
+
+    大台一口名目值 = 指數 × 200；指數 25,000 時為 500 萬。以現貨的 100 萬資本，
+    1× 槓桿（margin_utilization = margin_rate）連一口都下不起——實測 0 筆交易，
+    而報表只會顯示一張空表，不會有任何錯誤。
+
+    這條測試把「降槓桿必須同時檢查資本」這個非直觀的耦合釘死。
+    """
+    from config import load_config
+    from instruments import InstrumentRegistry
+    from trading_costs import for_asset_class
+
+    cfg = load_config()
+    reg = InstrumentRegistry.from_config(cfg.data.tickers, cfg.data.instruments)
+    txf = reg.resolve("TXF")
+    _, sizer = for_asset_class(txf, cfg)
+
+    # 台指史上高點量級；能在此價位下單即全歷史可交易
+    assert sizer.size(cfg.backtest.futures_init_capital, 25000.0) >= 1.0, (
+        "期貨資本不足以在高價位下 1 口——低槓桿下會得到 0 筆交易的空表。"
+        "調降 margin_utilization 時必須同步檢查 futures_init_capital。"
+    )
+
+
+def test_futures_uses_its_own_capital(cfg):
+    """期貨路徑須採 futures_init_capital，不得沿用現貨的 init_capital。"""
+    assert cfg.backtest.futures_init_capital != cfg.backtest.init_capital
+    rows = bs.run_scenarios(futures_daily_klines(400), TXF, cfg)
+    base = next(r for r in rows if r["kind"] == "baseline")
+    assert base["total_trades"] > 0, "期貨基準 0 筆交易——資本可能沿用了現貨的 100 萬"

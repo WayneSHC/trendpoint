@@ -85,6 +85,11 @@ SCENARIOS: List[Tuple[str, Dict[str, Any], str, bool]] = [
 # 不影響既有結論；它存在的目的是讓「策略被關掉」無法再偽裝成「風險改善」。
 DISABLING_BLOCK_RATIO = 0.5
 
+# 名目槓桿達此倍數即在報告中示警。5× 對應「指數反向 20% 即歸零」——
+# 台股史上單年跌幅超過此值者不在少數，故這已是研究用途的上限而非安全值。
+# 組態現值為 0.055 / 0.055 = 1×（P1 之後由 9.09× 調降，見 config.yaml 說明）。
+HIGH_LEVERAGE_WARN = 5.0
+
 
 def _expectancy(summary: Dict[str, Any]) -> float:
     """每筆交易的平均報酬率。無交易時為 0.0。"""
@@ -148,6 +153,10 @@ def evaluate(df: pd.DataFrame,
     engine = BacktestEngine(config=cfg)
     if initial_capital is not None:
         engine.initial_capital = float(initial_capital)
+    elif is_futures:
+        # 期貨資本與現貨分開：大台一口名目值遠大於現貨的 100 萬，
+        # 低槓桿下以現貨資本會連一口都下不起（0 筆交易）。
+        engine.initial_capital = float(cfg.backtest.futures_init_capital)
     res = engine.run_backtest(**kwargs)
     s = res["summary"]
     return {
@@ -162,7 +171,32 @@ def evaluate(df: pd.DataFrame,
         "trade_returns": s.get("trade_returns", []),
         "blown_up": s.get("blown_up", False),
         "blocked_bars": _blocked_bars(res),
+        "margin_dead": _margin_dead(res, df, sizer, is_futures),
     }
+
+
+def _margin_dead(res: Dict[str, Any], df: pd.DataFrame, sizer, is_futures: bool) -> bool:
+    """期貨帳戶是否已「保證金死亡」——權益不足以再下 1 口。
+
+    `blown_up` 只在**權益 ≤ 0** 時觸發（backtester.py FR-011），抓不到慢性失血。
+    但在保證金交易下，權益跌破一口保證金後 `FuturesSizer.size` 回傳 0 口，
+    策略就此靜默停止——帳戶功能上已經死了，旗標卻仍是 False。
+
+    TXF 實測即如此：權益剩約 2.3%（≈23,000），而 TXF@20,000 的每口保證金是
+    220,000，連一口都下不起。「28 年只有 7 筆交易」因此不是策略的特性，
+    是**帳戶早早死掉後再也沒錢進場**。不標記這件事，該序列的所有指標都會被
+    當成對策略的評價來讀。
+    """
+    if not is_futures:
+        return False
+    curve = res.get("equity_curve")
+    if curve is None or len(curve) == 0:
+        return False
+    eq_df = pd.DataFrame(curve) if not isinstance(curve, pd.DataFrame) else curve
+    final_equity = float(eq_df["equity"].iloc[-1])
+    # 以序列末端的未調整價評估：名目值型計算一律用未調整價（spec 011）
+    price_col = "unadj_close" if "unadj_close" in df.columns else "close"
+    return sizer.size(final_equity, float(df[price_col].iloc[-1])) < 1.0
 
 
 def _blocked_bars(res: Dict[str, Any]) -> int:
@@ -252,7 +286,8 @@ def run_scenarios(df: pd.DataFrame, instrument, cfg,
 
 def print_report(ticker: str, instrument, calibration: Dict[str, Any],
                  rows: List[Dict[str, Any]],
-                 fingerprint: Optional[Dict[str, Any]] = None) -> None:
+                 fingerprint: Optional[Dict[str, Any]] = None,
+                 leverage: Optional[float] = None) -> None:
     kind = "期貨（含空方）" if instrument.asset_class == AssetClass.FUTURES else "現貨"
     print(f"\n{'=' * 96}")
     print(f"B 段實測：{ticker}（{kind}）")
@@ -262,6 +297,14 @@ def print_report(ticker: str, instrument, calibration: Dict[str, Any],
         print(f"\n[資料指紋] {fingerprint['table']}｜{fingerprint['rows']} 根｜"
               f"{fingerprint['start']} ~ {fingerprint['end']}｜sha256:{fingerprint['sha256']}")
         print("  回填規格時務必一併記錄此指紋——沒有它，數字無從重現亦無從稽核。")
+
+    if leverage is not None:
+        print(f"\n[槓桿] 名目槓桿上限 = margin_utilization / margin_rate = {leverage:.2f}×")
+        print(f"  指數反向約 {1.0 / leverage:.1%} 即令權益歸零。此值與價位無關，"
+              f"由組態直接決定。")
+        if leverage >= HIGH_LEVERAGE_WARN:
+            print("  ⚠ 在此槓桿下，回測結果主要反映的是**槓桿設定**而非策略優劣；"
+                  "spec 012/013 的裁決不應以此序列為據。")
 
     print("\n[spec 013 SC-015] 回撤門檻校準（蒙地卡羅重抽）")
     if not calibration.get("available"):
@@ -294,6 +337,18 @@ def print_report(ticker: str, instrument, calibration: Dict[str, Any],
     if not active:
         return
     base = active[0]
+
+    dead = [r["label"] for r in active if r.get("margin_dead")]
+    if dead:
+        print(f"\n⚠ 保證金死亡：{'、'.join(dead)}")
+        print("  期末權益已不足以再下 1 口，策略在序列結束前即靜默停止進場。")
+        print("  （blown_up 只在權益 ≤ 0 時觸發，抓不到這種慢性失血。）")
+    if base.get("margin_dead"):
+        print("\n**基準已保證金死亡，本標的不進行判讀。**")
+        print("  基準的交易筆數反映的是「帳戶何時沒錢」而非策略的進場頻率，")
+        print("  以它為比較基準得到的任何差值都不具意義。請先調整槓桿再重跑。")
+        return
+
     print("\n判讀（兩把不同的尺）：")
     for r in active[1:]:
         d_ret = r["total_return"] - base["total_return"]
@@ -419,7 +474,11 @@ def run(target: Optional[str] = None, n_sims: int = 5000) -> int:
             dd_limit = None
 
         rows = run_scenarios(df, inst, cfg, dd_limit_pct=dd_limit)
-        print_report(inst.id, inst, calibration, rows, fingerprint=fp)
+        lev = None
+        if inst.asset_class == AssetClass.FUTURES:
+            fut = cfg.trading_cost.futures
+            lev = fut.margin_utilization / fut.margin_rate if fut.margin_rate else None
+        print_report(inst.id, inst, calibration, rows, fingerprint=fp, leverage=lev)
         evaluated += 1
 
     if evaluated == 0:
