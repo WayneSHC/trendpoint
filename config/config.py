@@ -79,6 +79,17 @@ class BacktestConfig(BaseModel):
         gt=0.0,
         description="初始投資資本，必須大於 0 元"
     )
+    futures_init_capital: float = Field(
+        default=10000000.0,
+        gt=0.0,
+        description=(
+            "期貨回測的初始資本（與現貨分開）。"
+            "大台一口名目值 = 指數 × 200，指數 25,000 時為 500 萬——"
+            "以現貨的 100 萬資本，低槓桿下連一口都下不起（0 筆交易），"
+            "槓桿與資本因此被合約規格綁死，無法各自獨立設定。"
+            "預設 1,000 萬使 1× 槓桿在全歷史價位皆可交易。"
+        )
+    )
 
 class SingleStrategyParams(BaseModel):
     """

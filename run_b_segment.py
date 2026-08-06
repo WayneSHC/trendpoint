@@ -87,7 +87,7 @@ DISABLING_BLOCK_RATIO = 0.5
 
 # 名目槓桿達此倍數即在報告中示警。5× 對應「指數反向 20% 即歸零」——
 # 台股史上單年跌幅超過此值者不在少數，故這已是研究用途的上限而非安全值。
-# 現行組態為 0.5 / 0.055 = 9.09×（反向 11% 歸零）。
+# 組態現值為 0.055 / 0.055 = 1×（P1 之後由 9.09× 調降，見 config.yaml 說明）。
 HIGH_LEVERAGE_WARN = 5.0
 
 
@@ -153,6 +153,10 @@ def evaluate(df: pd.DataFrame,
     engine = BacktestEngine(config=cfg)
     if initial_capital is not None:
         engine.initial_capital = float(initial_capital)
+    elif is_futures:
+        # 期貨資本與現貨分開：大台一口名目值遠大於現貨的 100 萬，
+        # 低槓桿下以現貨資本會連一口都下不起（0 筆交易）。
+        engine.initial_capital = float(cfg.backtest.futures_init_capital)
     res = engine.run_backtest(**kwargs)
     s = res["summary"]
     return {

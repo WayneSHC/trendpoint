@@ -473,3 +473,36 @@ def test_margin_dead_never_set_for_equity(cfg):
     """現貨無保證金概念，此旗標恆為 False。"""
     rows = bs.run_scenarios(daily_klines(400), EQUITY, cfg)
     assert all(r.get("margin_dead") is False for r in rows if not r.get("skipped"))
+
+
+def test_futures_capital_can_afford_a_lot_at_configured_leverage():
+    """期貨資本與槓桿被合約規格綁死，組態必須讓至少 1 口下得起。
+
+    大台一口名目值 = 指數 × 200；指數 25,000 時為 500 萬。以現貨的 100 萬資本，
+    1× 槓桿（margin_utilization = margin_rate）連一口都下不起——實測 0 筆交易，
+    而報表只會顯示一張空表，不會有任何錯誤。
+
+    這條測試把「降槓桿必須同時檢查資本」這個非直觀的耦合釘死。
+    """
+    from config import load_config
+    from instruments import InstrumentRegistry
+    from trading_costs import for_asset_class
+
+    cfg = load_config()
+    reg = InstrumentRegistry.from_config(cfg.data.tickers, cfg.data.instruments)
+    txf = reg.resolve("TXF")
+    _, sizer = for_asset_class(txf, cfg)
+
+    # 台指史上高點量級；能在此價位下單即全歷史可交易
+    assert sizer.size(cfg.backtest.futures_init_capital, 25000.0) >= 1.0, (
+        "期貨資本不足以在高價位下 1 口——低槓桿下會得到 0 筆交易的空表。"
+        "調降 margin_utilization 時必須同步檢查 futures_init_capital。"
+    )
+
+
+def test_futures_uses_its_own_capital(cfg):
+    """期貨路徑須採 futures_init_capital，不得沿用現貨的 init_capital。"""
+    assert cfg.backtest.futures_init_capital != cfg.backtest.init_capital
+    rows = bs.run_scenarios(futures_daily_klines(400), TXF, cfg)
+    base = next(r for r in rows if r["kind"] == "baseline")
+    assert base["total_trades"] > 0, "期貨基準 0 筆交易——資本可能沿用了現貨的 100 萬"
