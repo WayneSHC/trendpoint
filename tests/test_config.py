@@ -132,13 +132,20 @@ def test_equity_history_period_is_config_driven_not_hardcoded():
 
 
 def test_five_minute_period_is_not_config_driven():
-    """5 分線固定 5 天——那是 yfinance 對 5m 的供給上限，不是策略參數。
+    """5 分線的 period 是**資料源供給上限**，不是策略參數。
 
-    若它跟著 `equity_history_period` 走，設成 max 會直接讓 5m 取數失敗。
+    若它跟著 `equity_history_period` 走，設成 max 會直接讓 5m 取數失敗——
+    這個不變式才是本測試要守的東西。
+
+    **2026-08-06 更正**：原斷言為 `"5d"`，docstring 稱那是「yfinance 對 5m 的
+    供給上限」。該敘述不正確——Yahoo 對 5m 的回溯上限是 **60 天**，7 天是 `1m`
+    的限制。斷言改對齊模組常數，避免同一個錯誤前提在兩處各存一份。
     """
-    from data_sources.yfinance_source import YfinanceAdapter
+    from data_sources.yfinance_source import _FIVE_MIN_PERIOD, YfinanceAdapter
 
     class _Stub:
         equity_history_period = "max"
 
-    assert YfinanceAdapter(cfg=_Stub())._period_for("5m") == "5d"
+    got = YfinanceAdapter(cfg=_Stub())._period_for("5m")
+    assert got != "max", "5m period 不得跟隨 equity_history_period"
+    assert got == _FIVE_MIN_PERIOD == "60d"

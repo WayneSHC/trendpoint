@@ -24,6 +24,7 @@ yfinance 的 5m 只給 5 天（約 270 根），ma_period=200 連 1.35 個週期
     python run_5m_evaluation.py data/2330_TW_5m.csv
     python run_5m_evaluation.py data/2330_TW_5m.csv --ticker 2330.TW
     python run_5m_evaluation.py data/2330_TW_5m.csv --data-only   # 略過回測
+    python run_5m_evaluation.py --fetch 2330.TW                   # 現抓 yfinance 60 天
 
 CSV 格式（csv_source.py:30-38 的契約）：
     datetime,open,high,low,close,volume
@@ -55,6 +56,23 @@ SESSION_HOURS = 4.5          # 台股一般交易時段 09:00–13:30（performa
 # 少於 30 筆交易，任何期望值/PF 的信賴區間都寬到無法據以決策。
 MIN_TRADES_FOR_INFERENCE = 30
 MIN_BARS_PER_PARAM_CYCLE = 10   # 最長週期參數至少要能跑滿 10 個循環
+
+
+def fetch_yfinance(ticker: str, period: str) -> pd.DataFrame:
+    """現抓 yfinance 5 分線。
+
+    period 上限為 **60 天**（Yahoo 對 interval<1d 的回溯限制；7 天是 1m 的限制）。
+    走 data_ingestion.fetch_stock_data 以沿用既有的清洗與資料契約驗證。
+    """
+    from data_ingestion import fetch_stock_data
+    df = fetch_stock_data(ticker=ticker, period=period, interval="5m")
+    if df is None or df.empty:
+        sys.exit(f"yfinance 取得 {ticker} 5m 失敗或回傳空資料（period={period}）")
+    df.columns = [c.lower() for c in df.columns]
+    missing = {"open", "high", "low", "close", "volume"} - set(df.columns)
+    if missing:
+        sys.exit(f"yfinance 回傳缺少欄位 {sorted(missing)}；實際：{sorted(df.columns)}")
+    return df[["open", "high", "low", "close", "volume"]]
 
 
 def load_csv(path: str) -> pd.DataFrame:
@@ -309,20 +327,39 @@ def verdict(info: dict, p, n_trades: int | None) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser(
         description="盤中時框可行性評估（研究用途，不輸出績效結論）")
-    ap.add_argument("csv", help="盤中 OHLCV CSV 路徑")
+    ap.add_argument("csv", nargs="?", default=None, help="盤中 OHLCV CSV 路徑")
+    ap.add_argument("--fetch", metavar="TICKER", default=None,
+                    help="改為現抓 yfinance 5 分線（與 csv 二擇一）")
+    ap.add_argument("--period", default="60d",
+                    help="--fetch 的回溯期間，上限 60d（Yahoo 對 5m 的限制）")
+    ap.add_argument("--save-csv", default=None,
+                    help="--fetch 時另存 CSV 供重現（預設不存）")
     ap.add_argument("--ticker", default=None,
                     help="用哪個標的的 config 參數（預設走 strategy.default）")
     ap.add_argument("--data-only", action="store_true",
                     help="只跑資料體質與參數尺度，略過訊號與回測")
     args = ap.parse_args()
 
-    df = load_csv(args.csv)
-    cfg = load_config()
-    p = (cfg.strategy.get_params_for_ticker(args.ticker) if args.ticker
-         else cfg.strategy.default)
+    if bool(args.csv) == bool(args.fetch):
+        ap.error("請擇一提供 CSV 路徑或 --fetch TICKER")
 
-    print(f"\n檔案：{args.csv}")
-    print(f"參數來源：{'ticker_overrides[' + args.ticker + ']' if args.ticker else 'strategy.default'}")
+    if args.fetch:
+        df = fetch_yfinance(args.fetch, args.period)
+        source = f"yfinance {args.fetch} 5m period={args.period}"
+        if args.save_csv:
+            df.to_csv(args.save_csv)
+            print(f"已存 {args.save_csv}")
+    else:
+        df = load_csv(args.csv)
+        source = args.csv
+
+    cfg = load_config()
+    p = (cfg.strategy.get_params_for_ticker(args.ticker or args.fetch)
+         if (args.ticker or args.fetch) else cfg.strategy.default)
+
+    print(f"\n來源：{source}")
+    _t = args.ticker or args.fetch
+    print(f"參數來源：{'get_params_for_ticker(' + _t + ')' if _t else 'strategy.default'}")
     print()
 
     info = describe_data(df)

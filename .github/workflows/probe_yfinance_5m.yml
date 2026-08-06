@@ -1,0 +1,98 @@
+name: TrendPoint - 盤中時框可行性評估（yfinance 5 分線，手動觸發）
+
+# 用**免費且已在相依清單內**的 yfinance 回答「盤中系統跑不跑得出統計意義」。
+#
+# **為什麼現在才做得到**：`data_sources/yfinance_source.py` 原註解宣稱
+# 「5 天是 yfinance 對 5m 的上限」——該敘述不正確。Yahoo 對 5m 的回溯上限是
+# **60 天**（7 天是 1m 的限制）。`docs/reviews/2026-07-30-...` 第五節據
+# 「5m 只有約 270 根」判定盤中系統跑不出統計意義並予封存，而 60 天約 2,160 根
+# （40 交易日 × 54），是原估的 8 倍。本工作流程即該封存結論的重新檢驗。
+#
+# **為什麼需要 runner 而非本機**：開發容器的 agent proxy 對行情來源回 403
+# （CONNECT 政策拒絕），但 GitHub runner 可達——`alert_scheduler.yml` 每 30 分鐘
+# 實抓 yfinance 已長期證實（同 research_b_segment.yml 的理由）。
+#
+# **本工作流程唯讀**：不寫 DB、不改組態、不入庫。產出為文字報告與（選用的）
+# CSV 快照 artifact，供人工判讀。CSV 一併保留是為了**可重現**——yfinance 對
+# 同一請求會回傳浮動數值（research_b_segment.yml 已記錄此現象），沒有快照就
+# 無法區分「結論變了」與「資料變了」。
+
+on:
+  workflow_dispatch:
+    inputs:
+      tickers:
+        description: '標的（空白分隔，例：2330.TW 0050.TW）'
+        type: string
+        default: '2330.TW'
+      period:
+        description: '回溯期間（上限 60d——Yahoo 對 5m 的硬限制）'
+        type: string
+        default: '60d'
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: 檢出專案程式碼
+        uses: actions/checkout@v5
+
+      - name: 設定 Python 環境
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: 安裝相依套件
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # 經 env 傳遞輸入而非插值進指令字串（沿用既有 workflow 的慣例）。
+      # 逐標的獨立 tee：一檔失敗不影響其他檔的產出。
+      - name: 執行可行性評估
+        env:
+          TICKERS: ${{ inputs.tickers }}
+          PERIOD: ${{ inputs.period }}
+        run: |
+          mkdir -p artifacts data
+          rc=0
+          for t in $TICKERS; do
+            safe=$(echo "$t" | tr '.' '_')
+            echo "::group::$t"
+            python run_5m_evaluation.py \
+              --fetch "$t" --period "$PERIOD" \
+              --save-csv "data/${safe}_5m.csv" \
+              2>&1 | tee "artifacts/eval_${safe}.txt" || rc=1
+            echo "::endgroup::"
+          done
+          exit $rc
+
+      # 資料指紋：yfinance 對相同請求會回傳浮動數值（見 research_b_segment.yml
+      # 的實測記錄）。沒有指紋就無法區分「結論變了」與「資料變了」。
+      - name: 記錄資料指紋
+        if: always()
+        run: |
+          {
+            echo "# 5m 評估輸入指紋"
+            echo "# run_id=${{ github.run_id }}  sha=${{ github.sha }}  utc=$(date -u +%FT%TZ)"
+            echo "# 欄位：sha256  行數  檔案"
+            for f in data/*_5m.csv; do
+              [ -e "$f" ] || continue
+              printf '%s  %s  %s\n' \
+                "$(sha256sum "$f" | cut -d' ' -f1)" "$(wc -l < "$f")" "$f"
+            done
+          } | tee artifacts/data_fingerprint.txt
+
+      - name: 收集 CSV 快照
+        if: always()
+        run: mkdir -p artifacts/data && cp -v data/*_5m.csv artifacts/data/ 2>/dev/null || echo "（無 CSV）"
+
+      - name: 上傳報告與資料快照
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: yfinance-5m-eval-${{ github.run_id }}
+          path: artifacts/
+          retention-days: 30
