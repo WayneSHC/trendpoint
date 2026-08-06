@@ -157,3 +157,45 @@ def test_unadjusted_check_skipped_when_columns_absent():
     df = make_klines(30, freq="5min")
     assert "unadj_close" not in df.columns
     assert validate_data_contract(df, quality=_QUALITY) is True
+
+
+def _ohlcv(n=10):
+    idx = pd.bdate_range("2020-01-02", periods=n, name="Date")
+    base = np.linspace(100.0, 110.0, n)
+    return pd.DataFrame({"Open": base, "High": base + 1, "Low": base - 1,
+                         "Close": base, "Volume": np.full(n, 1000)}, index=idx)
+
+
+def test_nonpositive_price_treated_as_missing_and_forward_filled():
+    """來源以 0 表示「該根無資料」，須併入既有缺值路徑（ffill）而非讓匯入整批失敗。
+
+    真實案例：0050.TW 於 2009-08-13 的 open = 0（其餘欄位正常）。10 年窗口不含
+    該根，改取 max 全歷史後每次匯入都被資料合約擋下，整檔標的無法進入研究。
+    """
+    df = _ohlcv()
+    df.iloc[5, df.columns.get_loc("Open")] = 0.0
+
+    cleaned = clean_kline_dataframe(df)
+
+    assert (cleaned[["open", "high", "low", "close"]] > 0).all().all()
+    # ffill：取前一根的值，不得取後一根（那會是看前偏誤）
+    assert cleaned["open"].iloc[5] == cleaned["open"].iloc[4]
+    assert cleaned["open"].iloc[5] != df["Open"].iloc[6]
+    assert validate_data_contract(cleaned) is True
+
+
+def test_zero_volume_is_not_treated_as_missing():
+    """成交量 0 是合法的（無量交易日），遮罩它會製造假缺值。"""
+    df = _ohlcv()
+    df.iloc[3, df.columns.get_loc("Volume")] = 0
+    cleaned = clean_kline_dataframe(df)
+    assert cleaned["volume"].iloc[3] == 0
+
+
+def test_leading_nonpositive_price_is_dropped_not_backfilled():
+    """序列開頭的非正價格無前值可補，須剔除——嚴禁 bfill。"""
+    df = _ohlcv()
+    df.iloc[0, df.columns.get_loc("Open")] = 0.0
+    cleaned = clean_kline_dataframe(df)
+    assert len(cleaned) == len(df) - 1
+    assert cleaned.index[0] == df.index[1]
