@@ -216,9 +216,16 @@ def report_signal_density(df: pd.DataFrame, p) -> pd.DataFrame:
     )
 
     n = len(ind)
-    for col, label in [("bos_signal", "BOS（續勢）"),
-                       ("mss_signal", "MSS（反轉）"),
-                       ("regime_ok", "regime_ok（多方市況通過）"),
+    # 結構訊號是三值（+1 看漲 / -1 看跌 / 0 無）。**分方向計**——
+    # 現貨只走多方進場，把兩個方向合計會讓此處與【三之二】的基數對不起來。
+    for col, label in [("bos_signal", "BOS（續勢）"), ("mss_signal", "MSS（反轉）")]:
+        if col not in ind.columns:
+            continue
+        v = ind[col].fillna(0).astype(int)
+        up, dn = int((v == 1).sum()), int((v == -1).sum())
+        print(f"  {label:<24}多 {up:>6,} / 空 {dn:>6,}"
+              f"   （多方占 {up / n * 100:5.2f}%）")
+    for col, label in [("regime_ok", "regime_ok（多方市況通過）"),
                        ("regime_ok_short", "regime_ok_short（空方）")]:
         if col not in ind.columns:
             continue
@@ -231,6 +238,80 @@ def report_signal_density(df: pd.DataFrame, p) -> pd.DataFrame:
     print(f"  長均線暖機（ma_period）   {ma_warm:>7,} 根")
     print(f"  → 實際可用於判定的根數    {max(0, n - max(warm, ma_warm)):>7,} 根")
     return ind
+
+
+def report_filter_attrition(ind: pd.DataFrame) -> None:
+    """進場合取的逐道流失——回答「哪一道濾網是瓶頸」。
+
+    進場需**同時**滿足五道（`ladder_system.check_entry_signal:668-705`）：
+    結構 / 動能 / 趨勢 / 波動 / 全域。訊號多而交易少時，光看訊號數不知道
+    是哪一道把單子殺掉的，本段即為此而存在——它直接決定參數時框化該從
+    哪個參數下手。
+
+    **對齊**：回測引擎在第 i 根判定時，結構訊號取 `iloc[i-2]`、其餘四道取
+    `iloc[i-1]`（backtester.py:298-299）。故此處把 BOS 於索引 k 的訊號與
+    索引 k+1 的濾網配對，與引擎逐值一致。
+
+    僅長側 BOS 續勢。這**就是**現貨的全部進場路徑：`enable_short` 對現貨是
+    結構硬邊界，而 MSS 反轉分支需 `mss_reversal_entry=True`（backtester.py:108
+    預設 False，本 runner 不傳）。故本段的「五道全過」即為引擎的候選進場根數。
+
+    候選數 > 實際進場數是正常的——引擎僅在 `not pm.is_active` 時評估進場，
+    持倉期間的候選會被跳過。
+    """
+    print()
+    print("=" * 74)
+    print("【三之二】進場合取的逐道流失   —— 哪一道是瓶頸")
+    print("=" * 74)
+
+    need = {"daily_open", "vwap", "mid_price", "regime_ok", "atr"}
+    if not need.issubset(ind.columns):
+        print(f"  缺少欄位 {sorted(need - set(ind.columns))}，略過")
+        return
+
+    k = ind.index[:-1][ind["bos_signal"].fillna(0).astype(int).values[:-1] == 1]
+    if len(k) == 0:
+        print("  無 BOS 訊號，無可分析對象")
+        return
+    s = ind.shift(-1).loc[k]        # 判定根（訊號根的下一根）
+
+    atr_ok = s["atr"].notna() & (s["atr"] > 0)
+    checks = {
+        "動能（收陽線）": s["close"] > s["open"],
+        "趨勢（>當日開盤 且 >VWAP）": (s["close"] > s["daily_open"]) & (s["close"] > s["vwap"]),
+        "波動（振幅 > 1.2×ATR）": atr_ok & ((s["high"] - s["low"]) > 1.2 * s["atr"]),
+        "全域（>三關價中值 且 regime_ok）": (s["close"] > s["mid_price"]) & s["regime_ok"].fillna(False).astype(bool),
+    }
+
+    n = len(k)
+    print(f"  BOS 訊號（結構端已通過）  {n:>6,} 根\n")
+
+    # 單道通過率是**順序無關**的量，故歸因以它為準。
+    rates = {name: int(mask.fillna(False).sum()) for name, mask in checks.items()}
+    print(f"  {'單看每一道的通過率':<34}{'通過':>7}{'通過率':>10}")
+    print(f"  {'-' * 62}")
+    for name, c in rates.items():
+        print(f"  {name:<34}{c:>7,}{c / n * 100:>9.1f}%")
+
+    print(f"\n  {'逐道累積（合取）':<34}{'剩餘':>7}{'本道殺掉':>12}")
+    print(f"  {'-' * 62}")
+    cum = pd.Series(True, index=s.index)
+    prev = n
+    for name, mask in checks.items():
+        cum = cum & mask.fillna(False)
+        left = int(cum.sum())
+        print(f"  {name:<34}{left:>7,}{prev - left:>12,}")
+        prev = left
+    print("  （「本道殺掉」隨排列順序而變——合取沒有唯一歸因。歸因請看上表。）")
+
+    final = int(cum.sum())
+    print(f"\n  → 五道全過（可進場根數）  {final:,}")
+
+    bottleneck, passed = min(rates.items(), key=lambda kv: kv[1])
+    print(f"  → **瓶頸：{bottleneck}**——單道通過率僅 {passed / n * 100:.1f}%，"
+          f"為四道中最低")
+    if final == 0:
+        print("\n  ⚠ 合取為 0——交易數 0 的成因在此，不是回測引擎異常。")
 
 
 def report_backtest(df: pd.DataFrame, cfg, p, info: dict) -> int:
@@ -254,9 +335,16 @@ def report_backtest(df: pd.DataFrame, cfg, p, info: dict) -> int:
     )
     trades = res.get("trades", pd.DataFrame())
     summary = res.get("summary", {}) or {}
-    n_trades = len(trades)
 
-    print(f"  完成交易筆數        {n_trades:,}")
+    # `trades` 是**逐筆買賣明細**（BUY / SELL_ALL 各一列），不是來回交易數。
+    # 直接取 len() 會把腿數當成交易數、虛報一倍。以「進場」事件計來回。
+    if len(trades) and "event" in trades.columns:
+        n_trades = int(trades["event"].astype(str).str.contains("進場", na=False).sum())
+    else:
+        n_trades = 0
+
+    print(f"  買賣明細列數        {len(trades):,}")
+    print(f"  完成來回交易        {n_trades:,}")
     if n_trades:
         span_days = info["days"]
         print(f"  交易頻率            每 {span_days / n_trades:.1f} 個交易日一筆")
@@ -368,7 +456,8 @@ def main() -> None:
 
     n_trades = None
     if not args.data_only:
-        report_signal_density(df, p)
+        ind = report_signal_density(df, p)
+        report_filter_attrition(ind)
         n_trades = report_backtest(df, cfg, p, info)
 
     verdict(info, p, n_trades)
