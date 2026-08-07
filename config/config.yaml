@@ -26,6 +26,13 @@ data:
   # spec 010：期貨真實資料源參數（TAIFEX 回填/節流/重試 + 交叉驗證容差）
   futures_source:
     backfill_start: "1998-07-21"
+    # 台指類三商品上市日不同，共用 1998 起點會對 TAIFEX 發出數百個必然落空的
+    # 月請求（TMF 約 312 個 × 2 秒節流 ≈ 10 分鐘的空轉）。取上市**當月 1 日**：
+    # fetch_raw 本來就以月為請求單位，日精度不省請求，只徒增記錯一天就永久
+    # 截掉首日資料的風險。鍵必須是已宣告的 instrument id（Pydantic 驗證）。
+    backfill_start_overrides:
+      MTX: "2001-04-01"      # 小型臺指期貨上市：2001-04-09
+      TMF: "2024-07-01"      # 微型臺指期貨上市：2024-07-29
     throttle_seconds: 2.0
     max_retries: 3
     verify_tolerance: 0.0
@@ -54,14 +61,27 @@ data:
       exchange_fee_per_lot: 20     # 經手費 12 + 結算費 8（每口每邊）
   - id: MTX
     asset_class: futures
-    source: mock
-    display_name: 小型臺指近月（mock）
+    source: taifex          # spec 010 遺留的 mock 已於微台指接入時一併換成真源
+    display_name: 小型臺指期貨
     timeframes:
     - daily
     contract:
       point_value: 50       # 小台每點 NT$50
       tick_size: 1
       exchange_fee_per_lot: 12.5   # 經手費 7.5 + 結算費 5（每口每邊）
+  # 微型臺指期貨（2024-07-29 上市）。與 TX/MTX 同一標的指數，差別**只在合約
+  # 規模**——訊號序列本質相同，回測結果的差異來自成本佔比與口數量化粒度，
+  # 不是來自策略。要比較三者請並排看，別把它當成三個獨立標的的樣本數。
+  - id: TMF
+    asset_class: futures
+    source: taifex
+    display_name: 微型臺指期貨
+    timeframes:
+    - daily
+    contract:
+      point_value: 10       # 微台每點 NT$10（大台 1/20、小台 1/5）
+      tick_size: 1
+      exchange_fee_per_lot: 8.0    # 經手費 4.8 + 結算費 3.2（每口每邊）
 data_quality:
   max_close_jump_ratio: 3.0
 strategy:

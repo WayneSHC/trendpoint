@@ -28,7 +28,8 @@ from data_sources.rollover import (
 )
 
 _URL = "https://api.finmindtrade.com/api/v4/data"
-_COMMODITY_MAP = {"TXF": "TX"}
+# instrument id → FinMind futures_id（與 TAIFEX 代碼同字，故僅大台需對照）
+_COMMODITY_MAP = {"TXF": "TX", "MTX": "MTX", "TMF": "TMF"}
 
 
 class MissingTokenError(RuntimeError):

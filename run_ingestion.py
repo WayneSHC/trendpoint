@@ -59,11 +59,26 @@ def _ingest_taifex(inst, tf: str, sys_cfg, db_path: str, adapter) -> None:
         start = (existing["date"].max() + timedelta(days=1)).date()
         mode = f"增量（自 {start}）"
     else:
-        start = date.fromisoformat(fs_cfg.backfill_start)
+        # 逐 instrument 起始日：台指類三商品上市日不同（TX 1998、MTX 2001、TMF 2024）
+        start = date.fromisoformat(fs_cfg.backfill_start_for(inst.id))
         mode = f"回填（{start} 起，全歷史；約 {max(1, (date.today()-start).days//30)} 請求、"
         mode += f"節流 {fs_cfg.throttle_seconds}s/請求）"
     end = date.today()
     print(f"    - [taifex] {mode}")
+
+    # raw 層空、連續表卻已存在 → 那張表來自別的來源（歷史上 MTX 曾是 mock）。
+    # 回填成功會整表覆蓋，但**失敗時它會原封不動留著**，而此時 instrument
+    # 已宣告為 taifex、監控也不再加 MOCK 前綴——假資料會被當成真資料讀。
+    # 這是 run() docstring 那條「成功但用了舊資料」教訓的變體，故先示警。
+    if existing.empty:
+        try:
+            legacy = safe_load_db_data(db_path, table_name_for(inst, tf))
+        except Exception:
+            legacy = None
+        if legacy is not None and not legacy.empty:
+            print(f"    * [注意] {table_name_for(inst, tf)} 已有 {len(legacy)} 根資料，"
+                  f"但 raw 層是空的——該表非本來源產生（可能是舊 mock 資料）。"
+                  f"本次回填成功會整表覆蓋；**若回填失敗，請勿使用該表的回測結果**。")
 
     if start <= end:
         new_raw = adapter.fetch_raw(inst, tf, start, end)

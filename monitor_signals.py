@@ -252,6 +252,23 @@ def select_closed_bar_indices(bar_times: pd.DatetimeIndex,
         return -2, -3
     return -1, -2
 
+
+def instrument_label(ticker: str, instrument=None) -> str:
+    """推播訊息裡的標的顯示名。
+
+    台指類三商品（TXF/MTX/TMF）追蹤同一個指數，訊號序列幾乎相同——只印代碼
+    會讓同一個訊號的三則通知看起來像重複發送。故期貨顯示「商品名（代碼）」，
+    讓收件者一眼看出這是大台、小台還是微台。
+
+    現貨走 `equity_instrument`，其 `display_name` 恆等於 id，因此本函式回傳
+    的字串與引入它之前**逐字相同**——既有現貨告警文案零變更。
+    """
+    if instrument is None:
+        return ticker
+    name = getattr(instrument, "name", "") or ticker
+    return ticker if name == ticker else f"{name}（{ticker}）"
+
+
 def check_new_signals(ticker: str, alert_mgr: AlertManager, instrument=None):
     """
     獲取最新數據，計算指標並發送滿足條件的警訊。
@@ -264,6 +281,9 @@ def check_new_signals(ticker: str, alert_mgr: AlertManager, instrument=None):
         instrument is not None
         and getattr(instrument.asset_class, "value", instrument.asset_class) == "futures"
     )
+    # 訊息用顯示名（期貨帶商品別）。去重鍵與事後追蹤紀錄仍用 `ticker`——
+    # 那些是識別碼，不隨文案變動。
+    inst_label = instrument_label(ticker, instrument)
     mock_prefix = ""
     if is_futures:
         tf = "daily" if "daily" in instrument.timeframes else instrument.timeframes[0]
@@ -372,7 +392,7 @@ def check_new_signals(ticker: str, alert_mgr: AlertManager, instrument=None):
         # spec 015：偵測當下即記錄（**在去重判定之前**，FR-001）
         recorder.record(ticker, latest_time, alert_type, tf_label, latest_bar)
         if not is_alert_already_sent(ticker, latest_time, alert_type):
-            msg = f"<b>【多頭反轉訊號】</b>\n標的: {ticker}\n時間: {latest_time}\n價格: {latest_bar['close']:.2f}\n說明: 偵測到最新 K 線看漲 MSS 結構破壞，大成交量突破前高，趨勢可能反轉向上！\n當前階梯參考價: {latest_bar['ladder']:.2f}"
+            msg = f"<b>【多頭反轉訊號】</b>\n標的: {inst_label}\n時間: {latest_time}\n價格: {latest_bar['close']:.2f}\n說明: 偵測到最新 K 線看漲 MSS 結構破壞，大成交量突破前高，趨勢可能反轉向上！\n當前階梯參考價: {latest_bar['ladder']:.2f}"
             if alert_mgr.send_alert(mock_prefix + msg + intraday_note):
                 mark_alert_as_sent(ticker, latest_time, alert_type)
                 recorder.mark_notified(ticker, latest_time, alert_type)
@@ -382,7 +402,7 @@ def check_new_signals(ticker: str, alert_mgr: AlertManager, instrument=None):
         # spec 015：偵測當下即記錄（**在去重判定之前**，FR-001）
         recorder.record(ticker, latest_time, alert_type, tf_label, latest_bar)
         if not is_alert_already_sent(ticker, latest_time, alert_type):
-            msg = f"<b>【空頭反轉訊號】</b>\n標的: {ticker}\n時間: {latest_time}\n價格: {latest_bar['close']:.2f}\n說明: 偵測到最新 K 線看跌 MSS 結構破壞，大成交量跌破前低，趨勢可能反向做空！\n當前階梯參考價: {latest_bar['ladder']:.2f}"
+            msg = f"<b>【空頭反轉訊號】</b>\n標的: {inst_label}\n時間: {latest_time}\n價格: {latest_bar['close']:.2f}\n說明: 偵測到最新 K 線看跌 MSS 結構破壞，大成交量跌破前低，趨勢可能反向做空！\n當前階梯參考價: {latest_bar['ladder']:.2f}"
             if alert_mgr.send_alert(mock_prefix + msg + intraday_note):
                 mark_alert_as_sent(ticker, latest_time, alert_type)
                 recorder.mark_notified(ticker, latest_time, alert_type)
@@ -396,7 +416,7 @@ def check_new_signals(ticker: str, alert_mgr: AlertManager, instrument=None):
         # spec 015：偵測當下即記錄（**在去重判定之前**，FR-001）
         recorder.record(ticker, latest_time, alert_type, tf_label, latest_bar)
         if not is_alert_already_sent(ticker, latest_time, alert_type):
-            msg = f"<b>【多頭趨勢延續】</b>\n標的: {ticker}\n時間: {latest_time}\n價格: {latest_bar['close']:.2f}\n說明: 偵測到 BOS 結構連續突破，多頭力道持續加強！\n當前階梯參考價: {latest_bar['ladder']:.2f}"
+            msg = f"<b>【多頭趨勢延續】</b>\n標的: {inst_label}\n時間: {latest_time}\n價格: {latest_bar['close']:.2f}\n說明: 偵測到 BOS 結構連續突破，多頭力道持續加強！\n當前階梯參考價: {latest_bar['ladder']:.2f}"
             if alert_mgr.send_alert(mock_prefix + msg + intraday_note):
                 mark_alert_as_sent(ticker, latest_time, alert_type)
                 recorder.mark_notified(ticker, latest_time, alert_type)
@@ -406,7 +426,7 @@ def check_new_signals(ticker: str, alert_mgr: AlertManager, instrument=None):
         # spec 015：偵測當下即記錄（**在去重判定之前**，FR-001）
         recorder.record(ticker, latest_time, alert_type, tf_label, latest_bar)
         if not is_alert_already_sent(ticker, latest_time, alert_type):
-            msg = f"<b>【空頭趨勢延續】</b>\n標的: {ticker}\n時間: {latest_time}\n價格: {latest_bar['close']:.2f}\n說明: 偵測到 BOS 結構連續跌破，空頭趨勢強烈加壓！\n當前階梯參考價: {latest_bar['ladder']:.2f}"
+            msg = f"<b>【空頭趨勢延續】</b>\n標的: {inst_label}\n時間: {latest_time}\n價格: {latest_bar['close']:.2f}\n說明: 偵測到 BOS 結構連續跌破，空頭趨勢強烈加壓！\n當前階梯參考價: {latest_bar['ladder']:.2f}"
             if alert_mgr.send_alert(mock_prefix + msg + intraday_note):
                 mark_alert_as_sent(ticker, latest_time, alert_type)
                 recorder.mark_notified(ticker, latest_time, alert_type)
@@ -418,7 +438,7 @@ def check_new_signals(ticker: str, alert_mgr: AlertManager, instrument=None):
         # spec 015：偵測當下即記錄（**在去重判定之前**，FR-001）
         recorder.record(ticker, latest_time, alert_type, tf_label, latest_bar)
         if not is_alert_already_sent(ticker, latest_time, alert_type):
-            msg = f"<b>【突破上關價】</b>\n標的: {ticker}\n時間: {latest_time}\n價格: {latest_bar['close']:.2f}\n說明: 價格收盤強勢站上昨日三關價之上關位 ({latest_bar['upper_price']:.2f})！多頭波段進入強勢區域。"
+            msg = f"<b>【突破上關價】</b>\n標的: {inst_label}\n時間: {latest_time}\n價格: {latest_bar['close']:.2f}\n說明: 價格收盤強勢站上昨日三關價之上關位 ({latest_bar['upper_price']:.2f})！多頭波段進入強勢區域。"
             if alert_mgr.send_alert(mock_prefix + msg + intraday_note):
                 mark_alert_as_sent(ticker, latest_time, alert_type)
                 recorder.mark_notified(ticker, latest_time, alert_type)
@@ -429,7 +449,7 @@ def check_new_signals(ticker: str, alert_mgr: AlertManager, instrument=None):
         # spec 015：偵測當下即記錄（**在去重判定之前**，FR-001）
         recorder.record(ticker, latest_time, alert_type, tf_label, latest_bar)
         if not is_alert_already_sent(ticker, latest_time, alert_type):
-            msg = f"<b>【跌破下關價】</b>\n標的: {ticker}\n時間: {latest_time}\n價格: {latest_bar['close']:.2f}\n說明: 價格收盤跌破昨日三關價之下關位 ({latest_bar['lower_price']:.2f})！空頭波段進入弱勢區域。"
+            msg = f"<b>【跌破下關價】</b>\n標的: {inst_label}\n時間: {latest_time}\n價格: {latest_bar['close']:.2f}\n說明: 價格收盤跌破昨日三關價之下關位 ({latest_bar['lower_price']:.2f})！空頭波段進入弱勢區域。"
             if alert_mgr.send_alert(mock_prefix + msg + intraday_note):
                 mark_alert_as_sent(ticker, latest_time, alert_type)
                 recorder.mark_notified(ticker, latest_time, alert_type)
@@ -486,6 +506,7 @@ def check_ma_touch_alerts(ticker, alert_mgr, instrument, *,
     import ma_lines
 
     inst = instrument if instrument is not None else equity_instrument(ticker)
+    inst_label = instrument_label(ticker, inst)
     try:
         daily = safe_load_db_data(DB_PATH, table_name_for(inst, "daily"))
     except Exception as e:
@@ -526,7 +547,7 @@ def check_ma_touch_alerts(ticker, alert_mgr, instrument, *,
             continue
         dev = ma_lines.deviation_pct(price, ma_value)
         label = ma_lines.line_label(name)
-        msg = (f"<b>【跌破{label}】</b>\n標的: {ticker}\n時間: {latest_time}\n"
+        msg = (f"<b>【跌破{label}】</b>\n標的: {inst_label}\n時間: {latest_time}\n"
                f"價格: {price:.2f}\n{label} ({periods[name]} 日): {ma_value:.2f}\n"
                f"乖離: {dev:+.2%}\n"
                f"說明: 股價向下觸及或跌破{label}，請評估後續。")
