@@ -235,7 +235,15 @@ def calibrate_dd_limit(baseline: Dict[str, Any], n_sims: int = 5000) -> Dict[str
     上緣多半是「完全沒有回撤」的幸運路徑）。`monte_carlo.format_monte_carlo_report`
     早已寫明正確慣例：「風險預算應以回撤分布的 5 百分位（最深一側）為準」。
     """
-    mc = bootstrap_trades(baseline.get("trade_returns") or [], n_sims=n_sims, seed=42)
+    ## 為何在此攔輸入契約錯誤
+    # `bootstrap_trades` 對 <= -100% 的逐筆報酬硬失敗（分母語意壞掉的哨兵）。
+    # 在**函式庫**層硬失敗是對的；但本驅動是多標的批次研究工具，讓一檔的壞資料
+    # 炸掉整輪會連帶丟失其他標的已算完的結果。故此處轉為「該檔不可校準」，
+    # 原因原文照登於報告——失敗仍然可見，只是不再連坐。
+    try:
+        mc = bootstrap_trades(baseline.get("trade_returns") or [], n_sims=n_sims, seed=42)
+    except ValueError as e:
+        return {"available": False, "reason": f"逐筆報酬率不合契約：{e}"}
     if mc.get("n_source_trades", 0) == 0:
         return {"available": False, "reason": mc.get("warning", "無交易紀錄")}
 

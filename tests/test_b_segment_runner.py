@@ -169,6 +169,17 @@ def test_calibration_takes_the_deep_tail_not_the_shallow_one():
     assert out["suggested_dd_limit_pct"] > 0.02
 
 
+def test_calibration_reports_contract_violation_without_killing_the_run():
+    """逐筆報酬 <= -100%（分母語意壞掉）不可校準，但不得連坐其他標的。
+
+    函式庫層（bootstrap_trades）硬失敗是對的；批次驅動層必須把它轉成
+    「該檔不可校準 + 原因」，否則一檔壞資料會丟掉整輪已算完的結果。
+    """
+    out = bs.calibrate_dd_limit({"trade_returns": [0.02, -1.4, 0.03]}, n_sims=100)
+    assert out["available"] is False
+    assert "-100%" in out["reason"], "原因須原文轉載，否則現場無從判斷是哪類壞法"
+
+
 def test_calibration_warns_on_small_sample():
     """樣本 < 30 筆時必須帶 warning——那不是蒙地卡羅能補救的問題。"""
     out = bs.calibrate_dd_limit({"trade_returns": [0.01, -0.02, 0.03]}, n_sims=200)
@@ -475,14 +486,34 @@ def test_margin_dead_never_set_for_equity(cfg):
     assert all(r.get("margin_dead") is False for r in rows if not r.get("skipped"))
 
 
-def test_futures_capital_can_afford_a_lot_at_configured_leverage():
-    """期貨資本與槓桿被合約規格綁死，組態必須讓至少 1 口下得起。
+# 序列末端價位的下界，由 run 31115029496 反推：五情境全數保證金死亡、
+# 基準總報酬 -20.48%（期末權益 795.2 萬），判定式 final_equity < price × 200
+# ⟹ 末端未調整收盤 > 39,760。取 40,000 為檢查點，並留餘裕給後續上漲。
+TXF_SERIES_END_PRICE = 40000.0
 
-    大台一口名目值 = 指數 × 200；指數 25,000 時為 500 萬。以現貨的 100 萬資本，
-    1× 槓桿（margin_utilization = margin_rate）連一口都下不起——實測 0 筆交易，
+# 量化粒度下界。1 口是「跑得動」，不是「量得準」——口數 1 表示曝險只有
+# 全有或全無兩檔，權益曲線描述的多半是這個跳階而非策略。
+MIN_LOTS_FOR_MEANINGFUL_SIZING = 10
+
+
+def test_futures_capital_affords_meaningful_sizing_at_series_end_price():
+    """期貨資本與槓桿被合約規格綁死，組態必須讓末端價位仍有可用的口數粒度。
+
+    大台一口名目值 = 指數 × 200。以現貨的 100 萬資本，1× 槓桿
+    （margin_utilization = margin_rate）連一口都下不起——實測 0 筆交易，
     而報表只會顯示一張空表，不會有任何錯誤。
 
     這條測試把「降槓桿必須同時檢查資本」這個非直觀的耦合釘死。
+
+    ## 為什麼門檻是 10 口而不是 1 口（踩過的坑）
+
+    本測試原本斷言「25,000 點下得起 1 口」，註解寫著「台指史上高點量級」。
+    兩個數字都不對：run 31115029496 實測序列末端一口名目已逾 795 萬，
+    1,000 萬資本在該價位只剩 1 口，權益稍跌即 0 口——五個情境全數保證金死亡。
+
+    而且即使沒死，1 口的粒度本身就讓回測失去意義：早年 7,000 點可下 7 口、
+    末端只剩 1 口，曝險被指數漲幅單調稀釋，量化誤差蓋過策略訊號。
+    故門檻改以「粒度是否足以量測」為準，而非「跑不跑得動」。
     """
     from config import load_config
     from instruments import InstrumentRegistry
@@ -493,10 +524,12 @@ def test_futures_capital_can_afford_a_lot_at_configured_leverage():
     txf = reg.resolve("TXF")
     _, sizer = for_asset_class(txf, cfg)
 
-    # 台指史上高點量級；能在此價位下單即全歷史可交易
-    assert sizer.size(cfg.backtest.futures_init_capital, 25000.0) >= 1.0, (
-        "期貨資本不足以在高價位下 1 口——低槓桿下會得到 0 筆交易的空表。"
-        "調降 margin_utilization 時必須同步檢查 futures_init_capital。"
+    lots = sizer.size(cfg.backtest.futures_init_capital, TXF_SERIES_END_PRICE)
+    assert lots >= MIN_LOTS_FOR_MEANINGFUL_SIZING, (
+        f"期貨資本在末端價位 {TXF_SERIES_END_PRICE:,.0f} 點只夠 {lots:.0f} 口"
+        f"（需 ≥ {MIN_LOTS_FOR_MEANINGFUL_SIZING}）。口數量化誤差會蓋過策略訊號，"
+        "且權益稍跌即觸發保證金死亡、整份報告拒絕判讀。"
+        "調降 margin_utilization 或指數續漲時，必須同步檢查 futures_init_capital。"
     )
 
 

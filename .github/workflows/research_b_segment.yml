@@ -131,9 +131,14 @@ jobs:
         continue-on-error: true
         run: python run_walk_forward.py 2>&1 | tee artifacts/walk_forward_report.txt
 
+      # mkdir 不可省：建立 artifacts/ 的另外兩步（指紋、B 段實測）在匯入失敗時
+      # 會被 skip，本步驟卻是 if: always()。run 31137879960 即如此——匯入紅掉後
+      # `cp trendpoint.db artifacts/` 在目錄不存在下失敗，DB 沒進 artifact，
+      # 而那正是最需要拿它來查為什麼失敗的時候。
       - name: 收集產物
         if: always()
         run: |
+          mkdir -p artifacts
           cp -v trendpoint.db artifacts/ 2>/dev/null || echo "（無 trendpoint.db）"
           mkdir -p artifacts/data && cp -v data/*.csv artifacts/data/ 2>/dev/null || echo "（無 CSV 快取）"
           ls -la artifacts

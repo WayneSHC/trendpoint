@@ -26,6 +26,38 @@ from risk_gates import DrawdownGate, settlement_days
 from trading_costs import EquityCostModel, EquitySizer
 
 
+def _return_basis_price(row) -> float:
+    """逐筆報酬率（`trade_returns`）分母所用的基準價。
+
+    spec 011 FR-004：凡「價位 × 乘數」型**名目值**計算一律用未調整價。逐筆報酬率
+    的分母正是這種名目值，期貨紀錄的 `sizing_price`（訊號根未調整收盤）即該基準，
+    與口數/保證金同源；現貨紀錄無此欄，退回成交價 → 現貨分母逐位元不變。
+
+    ## 為什麼分子（profit）不必改
+    back-adjust 是**平移**，保留點差，故 `shares × Δ調整後價 × 乘數` 的 NT$ 損益正確；
+    錯的只有拿單一絕對價位當分母這一步。
+
+    ## 踩過的坑（本函式的存在理由）
+    原本分母直接用 `row['price']`（調整後價）。TXF 連續表早年 back-adjust 後偏離
+    真實市價約 45 倍且**穿零至 -5,312**，分母因此趨近 0 或變號，`profit / denom`
+    隨之爆量或翻號。徵狀：B 段 run 31084784625 的 TXF 期望值 -19.331%、重抽回撤
+    深尾 -567.70%——權益回撤在數學上不可能低於 -100%，該數字即分母失真的指紋。
+    """
+    p = row.get('sizing_price', None)
+    if p is None or pd.isna(p):
+        p = row['price']
+    p = float(p)
+    if p <= 0.0:
+        # 未調整價恆為正；走到這裡代表資料層或紀錄語意已壞。此處硬失敗而非
+        # 回退，理由同 spec 011「期貨缺 unadj_* 即硬失敗」——靜默的錯分母
+        # 會產出看似合理的報酬率，比中斷難察覺得多。
+        raise ValueError(
+            f"逐筆報酬率分母基準價非正（{p}）。期貨應使用未調整價 sizing_price，"
+            f"請檢查資料來源是否提供 unadj_* 欄位。"
+        )
+    return p
+
+
 class FuturesBacktestNotSupportedError(ValueError):
     """期貨回測不支援之路徑護欄（008a 引入；008b 後僅組合路徑仍使用）。"""
 
@@ -731,7 +763,11 @@ class BacktestEngine:
                     total_revenue += sell_row['shares'] * sell_row['price'] * sell_row.get('point_value', 1.0)
 
                     profit = total_revenue - initial_cost - total_friction
-                    paired_trades.append((profit, profit / initial_cost))
+                    # 分母另取未調整名目值（見 _return_basis_price）；分子沿用
+                    # initial_cost（調整後價之點差正確，不可換）。現貨兩者同值。
+                    return_basis = (buy_row['shares'] * _return_basis_price(buy_row) * pv_buy
+                                    + buy_row['commission'])
+                    paired_trades.append((profit, profit / return_basis))
 
             # spec 003：空方配對（SELL_SHORT → COVER_ALL，含中途 COVER_HALF）。
             # 多方配對段（上方）逐字不動；空方 profit = 進場名目 − 回補名目 − 摩擦。
@@ -749,7 +785,8 @@ class BacktestEngine:
 
                     pv_s = s_row.get('point_value', 1.0)
                     entry_value = s_row['shares'] * s_row['price'] * pv_s
-                    denom = entry_value + s_row['commission']
+                    # entry_value 供 profit（點差正確）；分母另取未調整名目值。
+                    denom = s_row['shares'] * _return_basis_price(s_row) * pv_s + s_row['commission']
 
                     exit_value = c_row['shares'] * c_row['price'] * c_row.get('point_value', 1.0)
                     total_friction = (c_row['commission'] + c_row['tax']

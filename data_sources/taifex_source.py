@@ -19,11 +19,14 @@ from __future__ import annotations
 
 import csv
 import io
+import logging
 import time
 from datetime import date, timedelta
 from typing import NamedTuple
 
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 import requests
 
 from data_sources import register_adapter
@@ -90,6 +93,10 @@ _SCHEMA_EN = _HeaderSchema(
     session="TradingSession",
 )
 _SCHEMAS = (_SCHEMA_ZH, _SCHEMA_EN)
+
+# 已知且刻意排除的時段值。列在此處者代表「我們認得它、決定不要它」，
+# 因此整批命中不構成格式異常；未列於此的值才是 TAIFEX 改標示的訊號。
+_KNOWN_EXCLUDED_SESSIONS = frozenset({"盤後"})
 
 # 缺值標記（無成交列）：中文 CSV 用 "-"，OpenAPI 另有 "NULL"
 _MISSING_MARKERS = {"", "-", "NULL"}
@@ -178,11 +185,25 @@ class TaifexAdapter(DataSourceAdapter):
         # 防呆：有候選列卻被時段檢查濾光 → TAIFEX 疑似改了時段標示（如比照表頭英譯）。
         # 靜默回空會讓 monitor_signals 的 `not latest_raw.empty` 無聲跳過、繼續用舊資料
         # 判訊號，比大聲壞掉更難察覺，故 fail-fast。休市/無此商品為 0 候選，不觸發。
+        #
+        # **但「全部是盤後」不算格式異常**（2026-08-07 實測修正）：盤後是我們刻意
+        # 排除的**已知**值，全部命中它只代表當日一般盤尚未結算——盤中查當日必然如此
+        # （台北 09:24 觸發的 run 31137879960 即因此整輪失敗）。真正要抓的是**沒見過**
+        # 的時段值，那才表示 TAIFEX 改了標示。故只在出現未知值時 fail-fast。
         if commodity_rows and len(session_rejected) == commodity_rows:
-            raise ValueError(
-                f"TAIFEX {commodity} 全部 {commodity_rows} 列均被交易時段檢查濾除"
-                f"（欄位 {schema.session!r} 實際值：{sorted(set(session_rejected))}；"
-                f"僅接受 '' 或 '一般'）——疑似 TAIFEX 變更時段標示，請更新過濾條件"
+            unknown = sorted(set(session_rejected) - _KNOWN_EXCLUDED_SESSIONS)
+            if unknown:
+                raise ValueError(
+                    f"TAIFEX {commodity} 全部 {commodity_rows} 列均被交易時段檢查濾除，"
+                    f"且含未知時段值 {unknown}"
+                    f"（欄位 {schema.session!r} 實際值：{sorted(set(session_rejected))}；"
+                    f"僅接受 '' 或 '一般'）——疑似 TAIFEX 變更時段標示，請更新過濾條件"
+                )
+            # 全為已知排除值 → 該區間尚無一般盤資料。回空是正確結果，但仍留紀錄：
+            # 呼叫端（run_ingestion 增量）會沿用既有表，不該讓這件事完全無聲。
+            logger.info(
+                "TAIFEX %s：%d 列全為已知排除時段 %s，該區間尚無一般盤結算資料，回空。",
+                commodity, commodity_rows, sorted(set(session_rejected)),
             )
 
         if not rows:
