@@ -142,6 +142,13 @@ description: "Task list for 014 — 均線觸價通知（月／季／半年／�
 - [X] T026 [P] [A] 更新 `CLAUDE.md`：專案地圖的通知段補上「均線觸價通知（spec 014，總開關預設關閉）」與 `ma_lines.py`；並註明本案使 `stock_*_daily` 在監控端有了第一個消費者
 - [X] T027 [P] [A] 更新 `README.md` 的功能說明與設定範例（`alerts` 區塊），說明四條線的預設週期與總開關預設關閉
 - [ ] T028 [B] **[需真實資料]** SC-013 實跑驗收：`python run_ingestion.py` → 於 config 開啟 `alerts.ma_alerts_enabled: true` → `python monitor_signals.py --once`（無憑證走 Mock 分支）。觀察四項：(a) 均線值可與看盤軟體目視對照、(b) 訊息含 FR-009 全部欄位、(c) **既有六種告警照常運作且內容未變**、(d) 資料不足的標的被正確跳過而非發出假均線。另跑 `streamlit run app.py` 確認現況表顯示正確
+  → **保持未完成（2026-08-07 覆核）。此項無法自動化代跑，須由使用者本人執行。**
+  觀察項 (a) 要求與**外部看盤軟體目視對照**、末句要求人工確認 Streamlit 畫面——
+  兩者都不是程式可斷言的判準，把它勾掉等於謊報。
+  另有環境限制：本專案的 CI/agent 環境 proxy 擋掉 yfinance 與 TAIFEX（403），
+  即使只跑 (b)(c)(d) 也取不到即時資料。
+  **使用者需做的事**：於本機依上述四步執行，四項觀察逐一目視確認後再勾選。
+  在此之前 `alerts.ma_alerts_enabled` 應維持 `false`（見本檔「啟用門檻」）
 
 ---
 

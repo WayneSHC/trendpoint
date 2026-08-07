@@ -133,13 +133,19 @@ python monitor_signals.py --once   # 單次訊號檢測與推播
   「證明了訊號有效」**——樣本頻率未經量化是本案已知的最大不確定性。`013`（進場閘門：回撤上限＋結算日封鎖，
   `specs/013-entry-gate-risk-limits`）**A 段已實作**——兩道閘門**預設關閉**，
   關閉時逐筆、逐根、逐欄與實作前相同（基準凍結於 `tests/fixtures/013_baseline_*`）；
-  是否改為預設啟用需 B 段真實資料實測（SC-014/015），未完成前**不得**宣稱本案
-  「降低了回撤」。`012`（BOS 續勢進場的量能確認，`specs/012-bos-volume-confirmation`）
+  **B 段已實測**（run 31138969771，2026-08-07）：回撤閘門在七個標的**全部封鎖 0 根**
+  ——這是**未觸發、無對照數據**，不是「無效」（結構性原因：SC-015 的門檻取自重抽
+  分布深尾，必然深於單一歷史路徑的 MDD，故被正確校準的門檻在校準它的序列上本就
+  幾乎不該觸發）；結算日閘門在 TXF **MDD 加深 1.37pp、Calmar 惡化一倍**。
+  兩道閘門**維持關閉且不再調參**。`012`（BOS 續勢進場的量能確認，`specs/012-bos-volume-confirmation`）
   **A 段已實作**——`ladder_system.calculate_volume_confirmation` 純函式 +
   `bos_volume_ok` 條件輸出欄，**預設關閉**。作用於**進場判定層**而非訊號層
   （訊號層抑制 BOS 會讓 `~bos` 互斥條件放行原本被排除的 MSS，等於改寫訊號定義）；
   **只接續勢分支**，MSS 反轉分支不傳（該路徑已內建自己的位移量能確認，
-  再套一次即雙重套用）。是否改為預設啟用需 B 段實測（SC-010）；
+  再套一次即雙重套用）。**B 段已實測**（同一輪 run）：SC-010 明文要求的兩個標的
+  （0050／TXF）**都惡化**，且樣本最多的 TXF 期望值 −1.560pp、PF 0.76→0.37；
+  四個「改善」的標的中三個是把交易砍到 2~5 筆換來的（兩個因此勝率 100%、PF=inf）。
+  **維持關閉且不再調參**——結論即 `run_ablation.py` 早已載明的失效模式；
   `004~006` 見各 spec.md 狀態。新功能走 Spec Kit：
   `/speckit-specify` → `/speckit-plan` → `/speckit-tasks` → `/speckit-implement`
 - 理論：`three_bands_theory.md`、`docs/ladder-optimization-research.md`（階梯優化研究，

@@ -79,7 +79,8 @@ SC-001 的逐筆比對將失去比對對象。
 - [X] T015 [P] [US1] [A] 新增 SC-005 測試：`bos_volume_period` 暖機區間內（前 N 根）啟用濾網時不產生任何進場
 - [X] T016 [P] [US1] [A] 新增 SC-007 測試：斷言 `run_ablation.ABLATION_TARGETS` 含 `'bos_volume'` 鍵；並以合成資料實跑該消融列，斷言交易筆數/期望值/PF/MDD 皆有值（非 NaN、非空）
 - [X] T017 [P] [US1] [A] 新增 SC-008 測試：反轉（MSS）進場分支的判定在濾網啟用前後完全相同——即使該根 `bos_volume_ok` 為 False，MSS 進場仍成立（證明 FR-005 未雙重套用）
-- [ ] T018 [US1] [B] **[需真實資料]** SC-010 前後回測對照：依 [quickstart.md](quickstart.md) B 段步驟，對 `0050.TW`（現貨）與 `TXF`（期貨，含空方）跑啟用/停用兩組，記錄交易筆數、扣成本後期望值、Profit Factor、MDD、勝率（僅輔助）
+- [X] T018 [US1] [B] **[需真實資料]** SC-010 前後回測對照：依 [quickstart.md](quickstart.md) B 段步驟，對 `0050.TW`（現貨）與 `TXF`（期貨，含空方）跑啟用/停用兩組，記錄交易筆數、扣成本後期望值、Profit Factor、MDD、勝率（僅輔助）
+  → **完成 2026-08-07，run 31138969771**（GitHub Actions，非本機——此環境的 agent proxy 擋掉 yfinance/TAIFEX）。實跑 7 標的（要求的 2 個 + 5 個旁證）。**結論：期望值未改善**，逐項數字與判定依據回填於 `spec.md` SC-010
 
 **Checkpoint**: US1 的 A 段可獨立交付——消融器材就位、可量化；B 段待本機資料
 
@@ -99,6 +100,7 @@ SC-001 的逐筆比對將失去比對對象。
 - [X] T023 [US2] [A] 在 `monitor_signals.py` 的 `check_new_signals` 取 `cfg.strategy.get_params_for_ticker(ticker)`，穿線**本案三個新參數**至 `build_indicator_frame`；濾網啟用時 BOS 告警（`:214-227`）額外要求 `latest_bar['bos_volume_ok']`。**既有硬編碼 `structure_period=10` / `use_fvg=True` / `fvg_lookback=3` 保持不動**（research.md D5——順手改會污染預設行為）— FR-010
 - [X] T024 [P] [US2] [A] 新增 monitor 迴歸測試：濾網關閉時，對固定合成 df 的告警集合與實作前相同（沿用 spec 004 遷移契約的 monitor 判定迴歸範式）
 - [ ] T025 [US2] [B] **[需真實資料]** SC-011：濾網啟用後實跑 `python monitor_signals.py --once`，比對其對續勢進場候選的判定與同一資料的回測一致（量能未達門檻的 BOS 不得推播為進場候選）
+  → **未執行。** 需在本機（可達 yfinance）啟用濾網後實跑並人工比對。優先度已因 T018 的結論下降：濾網維持關閉，兩端在該條件上的一致性目前無實際影響面。若日後決定啟用濾網，此項須先完成
 
 **Checkpoint**: 基準位元不變已由 CI 常態守門；backtest/live 對新濾網的判定一致
 
@@ -126,8 +128,10 @@ SC-001 的逐筆比對將失去比對對象。
 - [X] T029 [P] [A] 驗證 Numba 降級路徑：在無 Numba 環境重跑本案測試，輸出須一致（憲章原則 IV；CI 已有 uninstall-rerun 步驟）
 - [X] T030 [P] [A] 更新 `CLAUDE.md` 專案地圖：於 specs 清單加入 `012`（BOS 量能確認濾網，預設關閉、待實測裁決）一行
 - [X] T031 [P] [A] 在 `docs/reviews/2026-07-30-wma-strategy-review.md` 的「真正的缺口」第 1 項補上交叉引用連結至 `specs/012-bos-volume-confirmation/`
-- [ ] T032 [B] **[需真實資料]** 把 T018 的實測數字回填至 `spec.md` 的 SC-010 條目，**無論結果有利與否**；若期望值未改善，維持 `use_bos_volume: false` 並於 spec 標註「實測無益」，Status 標為 `Implemented（濾網保留關閉）`
-- [ ] T033 [B] **[需真實資料]** 僅當 T018 結果有利才執行：`python run_walk_forward.py` 取 out-of-sample 確認後，才可討論是否改為預設啟用（單次回測對照不足以支撐採用決策）
+- [X] T032 [B] **[需真實資料]** 把 T018 的實測數字回填至 `spec.md` 的 SC-010 條目，**無論結果有利與否**；若期望值未改善，維持 `use_bos_volume: false` 並於 spec 標註「實測無益」，Status 標為 `Implemented（濾網保留關閉）`
+  → **完成 2026-08-07。** 七標的完整表格、資料指紋、判定依據已寫入 SC-010；另新增「B 段實測發現」一節記錄兩項可轉移的教訓。`use_bos_volume` 維持 `false`，Status 已改為 `Implemented（濾網保留關閉）`
+- [~] T033 [B] **[需真實資料]** 僅當 T018 結果有利才執行：`python run_walk_forward.py` 取 out-of-sample 確認後，才可討論是否改為預設啟用（單次回測對照不足以支撐採用決策）
+  → **不執行（前提未成立）。** T018 結果不利，本任務的觸發條件按定義未滿足。對一個實測無益的濾網再跑樣本外，是在為已否決的選項尋找支持證據
 
 ---
 
