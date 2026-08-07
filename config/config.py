@@ -26,6 +26,18 @@ class FuturesDataSourceConfig(BaseModel):
         default="1998-07-21",
         description="歷史回填起始日（TX 上市日；clarify 定案全歷史，可調）"
     )
+    backfill_start_overrides: Dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "逐 instrument 的回填起始日覆寫（instrument id → ISO 日期）。"
+            "台指類三商品**上市日不同**：TX 1998-07、MTX 2001-04、TMF 2024-07。"
+            "共用 1998 起始會對 TAIFEX 發出數百個必然落空的月請求"
+            "（TMF 約 312 個 × 節流 2 秒 ≈ 10 分鐘），故逐商品指定。"
+            "取上市**當月 1 日**而非確切掛牌日：`fetch_raw` 本就以月為請求單位"
+            "（`start.replace(day=1)`），故日精度不省請求，只徒增「日期記錯一天"
+            "就永久截掉首日資料」的風險。"
+        )
+    )
     throttle_seconds: float = Field(
         default=2.0, ge=0.0,
         description="TAIFEX 回填每請求間隔秒數（未公告限流之保守節流）"
@@ -38,6 +50,36 @@ class FuturesDataSourceConfig(BaseModel):
         default=0.0, ge=0.0,
         description="交叉驗證容差（TAIFEX vs FinMind 同源鏡像，預設全等）"
     )
+    latest_cache_seconds: float = Field(
+        default=15.0, ge=0.0,
+        description=(
+            "當日端點（OpenAPI）回應的快取秒數。該端點一次回傳**全市場**所有商品，"
+            "監控輪詢卻是逐 instrument 呼叫——三個台指類商品會對同一份資料打三次。"
+            "同一輪內共用回應即可維持「至多 1 請求/輪詢」。"
+            "預設 15 秒：足以涵蓋一輪內連續處理數個期貨標的，又遠短於預設 60 秒的"
+            "輪詢間隔，故不會把上一輪的資料帶進下一輪。設 0 = 停用快取。"
+        )
+    )
+
+    @model_validator(mode="after")
+    def _check_dates_parseable(self) -> "FuturesDataSourceConfig":
+        """回填起始日必須是可解析的 ISO 日期——壞值要在載入組態時炸，
+        而不是在回填跑了幾百個請求之後才於 `date.fromisoformat` 崩掉。"""
+        from datetime import date as _date
+        for label, value in [("backfill_start", self.backfill_start),
+                             *((f"backfill_start_overrides['{k}']", v)
+                               for k, v in self.backfill_start_overrides.items())]:
+            try:
+                _date.fromisoformat(value)
+            except ValueError as e:
+                raise ValueError(
+                    f"data.futures_source.{label} 不是合法的 ISO 日期（YYYY-MM-DD）：{value!r}"
+                ) from e
+        return self
+
+    def backfill_start_for(self, instrument_id: str) -> str:
+        """該 instrument 的回填起始日：有覆寫用覆寫，否則用全域預設。"""
+        return self.backfill_start_overrides.get(instrument_id, self.backfill_start)
 
 
 class DataConfig(BaseModel):
@@ -69,6 +111,24 @@ class DataConfig(BaseModel):
         default_factory=list,
         description="結構化 instrument 宣告（期貨/明確資產類別，spec 008a）；與 tickers 合併為 registry"
     )
+
+    @model_validator(mode="after")
+    def _backfill_overrides_reference_declared_instruments(self) -> "DataConfig":
+        """回填覆寫的鍵必須對應到已宣告的 instrument id。
+
+        打錯 id 的後果是**靜默**的：`backfill_start_for` 找不到鍵就回全域預設，
+        於是 TMF 悄悄從 1998 年開始回填，多花十分鐘卻仍然「成功」。
+        這種只會變慢、不會變紅的錯誤最難察覺，故在載入時就擋掉。
+        """
+        declared = {inst.id for inst in self.instruments}
+        unknown = sorted(set(self.futures_source.backfill_start_overrides) - declared)
+        if unknown:
+            raise ValueError(
+                f"data.futures_source.backfill_start_overrides 含未宣告的 instrument id "
+                f"{unknown}；已宣告者為 {sorted(declared)}"
+            )
+        return self
+
 
 class BacktestConfig(BaseModel):
     """

@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       scope:
-        description: '資料範圍：equity=只灌現貨（快）；full=含期貨 TAIFEX 回填（首次約 11 分鐘）'
+        description: '資料範圍：equity=只灌現貨（快）；full=含期貨 TAIFEX 回填（三商品首次共約 25 分鐘）'
         type: choice
         options: [equity, full]
         default: equity

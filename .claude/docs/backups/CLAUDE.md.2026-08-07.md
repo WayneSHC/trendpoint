@@ -68,18 +68,15 @@ python monitor_signals.py --once   # 單次訊號檢測與推播
   組態覆寫全在記憶體內、不寫回 config；判讀用**兩把尺**（訊號濾網看期望值/PF、
   風控閘門看 MDD/Calmar，情境表以 `kind` 欄宣告，勿用標籤字串比對）。
   無法本機取數時走 `.github/workflows/research_b_segment.yml`（手動觸發，
-  產出 artifact）。**出網能力會隨 harness 版本漂移，別當常數**：曾實測 agent proxy
-  擋掉 yfinance 與 TAIFEX（403），但 2026-08-07 於本機 Claude Code 實測**兩者皆通**
-  （TAIFEX 三商品回填、yfinance 五檔現貨全部成功）。故先試跑一次再決定要不要繞
-  GitHub runner，勿因這行字直接放棄本機取數
+  產出 artifact）——**此環境的 agent proxy 擋掉 yfinance 與 TAIFEX**（403），
+  但 GitHub runner 可達
 - 資料：`instruments.py`（Instrument 資產類別抽象 + registry，spec 008a）→
   `data_sources/`（可插拔來源 adapter：yfinance/csv/mock + **taifex 真源/finmind 驗證源**
   （spec 010）；`rollover.py` 連續月引擎——量最大月轉倉 + back-adjust）→
   `data_ingestion.py` → SQLite `trendpoint.db`（gitignored）；表名一律經
   `db_security.table_name_for`（equity→`stock_*`、futures→`fut_*`、raw 層→`fut_*_raw_*`）；
-  `verify_futures_data.py` 雙源交叉驗證（哨兵，需 FINMIND_TOKEN 環境變數；
-  **逐 taifex instrument 各驗一次**——只驗第一個會讓未驗商品被說成驗過了）；
-  期貨監控取數＝讀庫＋當日端點（**禁**輪詢中呼叫重量 fetch()）；`data/*.csv` 為快取。
+  `verify_futures_data.py` 雙源交叉驗證（哨兵，需 FINMIND_TOKEN 環境變數）；
+  TXF 監控取數＝讀庫＋當日端點（**禁**輪詢中呼叫重量 fetch()）；`data/*.csv` 為快取。
   **現貨只入日線**：`stock_*_5m` 曾被寫入但從未被任何程式讀取，已停止產生
   （監控端 5 分線一律現抓——繞經 DB 不會少一次下載，5 分線本質是盤中即時資料）。
   `run_ingestion.py --equity-only` 供排程監控預熱日線表（`alert_scheduler.yml`
@@ -118,13 +115,8 @@ python monitor_signals.py --once   # 單次訊號檢測與推播
   `008a`（資料層）+ `008b`（期貨成本/口數，`specs/009-taifex-cost-model`）已併入 main；
   `003`（台指期做空）已併入 main——期貨單標的**多空**回測
   （`enable_short` 預設關、現貨結構硬邊界、鏡像對稱測試）；組合路徑護欄保留（僅現貨）；
-  `010`（真實台指期資料源，`specs/010-taifex-real-data`）已併入 main——台指類
-  **三商品全接 TAIFEX 官方**（大台 TXF/小台 MTX/微台 TMF，全歷史回填 + 每日增量）、
-  FinMind 交叉驗證逐商品各跑一次。三者同標的指數、**訊號序列本質相同**，
-  差別只在合約規模（每點 200/50/10）→ 成本佔比與口數量化粒度；
-  勿把三份回測結果當成三個獨立標的的樣本數。回填起始日逐商品設於
-  `data.futures_source.backfill_start_overrides`（上市日不同：1998/2001/2024，
-  共用起點會空轉數百個月請求）；
+  `010`（真實台指期資料源，`specs/010-taifex-real-data`）已併入 main——TXF 接
+  TAIFEX 官方（1998 起全歷史回填/每日增量）、FinMind 交叉驗證、MTX 暫留 mock；
   `011`（未調整參考價，`specs/011-unadjusted-sizing-price`）解決 010 的 sizing
   失真已知限制——**期貨連續表帶兩組價格**：調整後 OHLC 供訊號與每點損益、
   `unadj_*` 四欄（平移前擷取的原始近月價）供口數/保證金/期交稅等名目值計算。
@@ -141,19 +133,13 @@ python monitor_signals.py --once   # 單次訊號檢測與推播
   「證明了訊號有效」**——樣本頻率未經量化是本案已知的最大不確定性。`013`（進場閘門：回撤上限＋結算日封鎖，
   `specs/013-entry-gate-risk-limits`）**A 段已實作**——兩道閘門**預設關閉**，
   關閉時逐筆、逐根、逐欄與實作前相同（基準凍結於 `tests/fixtures/013_baseline_*`）；
-  **B 段已實測**（run 31138969771，2026-08-07）：回撤閘門在七個標的**全部封鎖 0 根**
-  ——這是**未觸發、無對照數據**，不是「無效」（結構性原因：SC-015 的門檻取自重抽
-  分布深尾，必然深於單一歷史路徑的 MDD，故被正確校準的門檻在校準它的序列上本就
-  幾乎不該觸發）；結算日閘門在 TXF **MDD 加深 1.37pp、Calmar 惡化一倍**。
-  兩道閘門**維持關閉且不再調參**。`012`（BOS 續勢進場的量能確認，`specs/012-bos-volume-confirmation`）
+  是否改為預設啟用需 B 段真實資料實測（SC-014/015），未完成前**不得**宣稱本案
+  「降低了回撤」。`012`（BOS 續勢進場的量能確認，`specs/012-bos-volume-confirmation`）
   **A 段已實作**——`ladder_system.calculate_volume_confirmation` 純函式 +
   `bos_volume_ok` 條件輸出欄，**預設關閉**。作用於**進場判定層**而非訊號層
   （訊號層抑制 BOS 會讓 `~bos` 互斥條件放行原本被排除的 MSS，等於改寫訊號定義）；
   **只接續勢分支**，MSS 反轉分支不傳（該路徑已內建自己的位移量能確認，
-  再套一次即雙重套用）。**B 段已實測**（同一輪 run）：SC-010 明文要求的兩個標的
-  （0050／TXF）**都惡化**，且樣本最多的 TXF 期望值 −1.560pp、PF 0.76→0.37；
-  四個「改善」的標的中三個是把交易砍到 2~5 筆換來的（兩個因此勝率 100%、PF=inf）。
-  **維持關閉且不再調參**——結論即 `run_ablation.py` 早已載明的失效模式；
+  再套一次即雙重套用）。是否改為預設啟用需 B 段實測（SC-010）；
   `004~006` 見各 spec.md 狀態。新功能走 Spec Kit：
   `/speckit-specify` → `/speckit-plan` → `/speckit-tasks` → `/speckit-implement`
 - 理論：`three_bands_theory.md`、`docs/ladder-optimization-research.md`（階梯優化研究，

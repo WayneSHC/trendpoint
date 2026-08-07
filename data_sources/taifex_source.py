@@ -41,8 +41,11 @@ _DOWN_URL = "https://www.taifex.com.tw/cht/3/futDataDown"
 _OPENAPI_URL = "https://openapi.taifex.com.tw/v1/DailyMarketReportFut"
 _UA = {"User-Agent": "Mozilla/5.0 (TrendPoint research; contact: local)"}
 
-# instrument id → TAIFEX commodity_id（查詢代碼）
-_COMMODITY_MAP = {"TXF": "TX"}
+# instrument id → TAIFEX commodity_id（查詢代碼）。
+# 只有大台需要對照（我方 id 為 TXF，TAIFEX 代碼是 TX）；小台與微台的 id 與
+# TAIFEX 代碼同字，經 `_commodity` 的 identity fallback 即可。仍明列於此，
+# 是為了讓「本系統支援哪些 TAIFEX 商品」有一個可讀的單一清單。
+_COMMODITY_MAP = {"TXF": "TX", "MTX": "MTX", "TMF": "TMF"}
 
 # 表頭語言隨端點而異（實測 2026-07-18）：CSV 下載端點回中文（MS950），
 # OpenAPI 當日端點回**英文鍵**——但兩者的「交易時段」值皆為中文（一般/盤後），
@@ -115,6 +118,8 @@ class TaifexAdapter(DataSourceAdapter):
         self._session = session or requests
         self._sleep = sleeper if sleeper is not None else time.sleep
         self._today = date.today   # 可注入（測試固定今日）
+        self._clock = time.monotonic   # 可注入（測試控制快取過期）
+        self._latest_cache: tuple[float, str] | None = None
 
     # ------------------------------------------------------------------ 解析
 
@@ -266,25 +271,49 @@ class TaifexAdapter(DataSourceAdapter):
         return (raw.drop_duplicates(subset=["date", "contract"], keep="last")
                    .sort_values(["date", "contract"]).reset_index(drop=True))
 
-    def fetch_latest(self, instrument) -> pd.DataFrame:
-        """OpenAPI 當日列（UTF-8 JSON；實測回**英文鍵**，時段值仍為中文）。"""
-        commodity = self._commodity(instrument)
+    def _fetch_latest_payload(self) -> str:
+        """當日端點的原始回應（轉成 CSV 等價文字），**跨商品共用**。
+
+        該端點一次回傳全市場所有商品，但監控輪詢是逐 instrument 呼叫的——
+        三個台指類商品若各打一次，就會為同一份資料發出三個請求，違反監控端
+        「至多 1 請求/輪詢」的限制。故在 `latest_cache_seconds` 內共用回應。
+
+        快取存的是**未過濾的原始文字**而非解析結果：過濾條件隨商品而異，
+        存解析結果等於要為每個商品各存一份，那就不叫共用了。
+        """
+        now = self._clock()
+        ttl = getattr(self._cfg, "latest_cache_seconds", 0.0)
+        if self._latest_cache is not None and ttl > 0:
+            cached_at, text = self._latest_cache
+            if now - cached_at < ttl:
+                return text
+
         resp = self._session.get(_OPENAPI_URL, headers=_UA, timeout=30)
         resp.raise_for_status()
         recs = resp.json()
         if not isinstance(recs, list):
             raise ValueError(f"TAIFEX OpenAPI 回應非列表：{type(recs)}")
-        # 轉為 CSV 等價文字走同一解析器（欄位名一致、單一真實解析路徑）
         if not recs:
+            text = ""
+        else:
+            # 轉為 CSV 等價文字走同一解析器（欄位名一致、單一真實解析路徑）
+            fieldnames = list(recs[0].keys())
+            buf = io.StringIO()
+            w = csv.DictWriter(buf, fieldnames=fieldnames)
+            w.writeheader()
+            for r in recs:
+                w.writerow(r)
+            text = buf.getvalue()
+        self._latest_cache = (now, text)
+        return text
+
+    def fetch_latest(self, instrument) -> pd.DataFrame:
+        """OpenAPI 當日列（UTF-8 JSON；實測回**英文鍵**，時段值仍為中文）。"""
+        text = self._fetch_latest_payload()
+        if not text:
             return pd.DataFrame()
-        fieldnames = list(recs[0].keys())
-        buf = io.StringIO()
-        w = csv.DictWriter(buf, fieldnames=fieldnames)
-        w.writeheader()
-        for r in recs:
-            w.writerow(r)
         # 直接傳 str：JSON 為 UTF-8，經 big5 轉碼會把非 big5 字元吃成 '?'
-        return self._parse_csv(buf.getvalue(), commodity=commodity)
+        return self._parse_csv(text, commodity=self._commodity(instrument))
 
     # ---------------------------------------------------------------- fetch
 
@@ -292,7 +321,7 @@ class TaifexAdapter(DataSourceAdapter):
         """008a 契約：回傳已拼接連續序列。⚠ 重量（全區間網路）——僅 ingestion/測試。"""
         if timeframe != "daily":
             raise ValueError(f"TAIFEX adapter 僅支援 daily（收到 {timeframe!r}）")
-        start = date.fromisoformat(self._cfg.backfill_start)
+        start = date.fromisoformat(self._cfg.backfill_start_for(instrument.id))
         raw = self.fetch_raw(instrument, timeframe, start, self._today())
         if raw.empty:
             raise ValueError(f"TAIFEX 回傳空資料（{instrument.id}，{start} 起）")

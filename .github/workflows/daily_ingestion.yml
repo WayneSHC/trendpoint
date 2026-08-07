@@ -22,7 +22,9 @@ concurrency:
 jobs:
   ingest:
     runs-on: ubuntu-latest
-    # 首次全歷史回填約 341 請求 × 2s 節流 ≈ 15~20 分鐘；留足餘裕但不無上限
+    # 首次全歷史回填 ≈ 670 請求 × 2s 節流 ≈ 25~30 分鐘
+    # （TXF 1998 起 341 + MTX 2001 起約 305 + TMF 2024 起約 26；起始日逐商品，
+    #  見 config 的 backfill_start_overrides）。留足餘裕但不無上限。
     timeout-minutes: 60
 
     steps:
@@ -56,7 +58,7 @@ jobs:
       # run_ingestion.py 對每個標的都是 try/except + continue，TAIFEX 整段失敗
       # 它仍然 exit 0。沒有這一步，工作流會在 TXF 完全沒進來的情況下報 success
       # ——正是 .claude/docs/judgment-rubrics.md 第 5 節那兩條教訓的形狀。
-      - name: 驗證 TXF 連續表確實存在且有資料
+      - name: 驗證每個 TAIFEX 期貨連續表確實存在且有資料
         run: |
           python - <<'PY'
           import sys

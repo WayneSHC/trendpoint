@@ -89,20 +89,51 @@ def cross_verify(start: date, end: date, *, tolerance: float = None,
     return VerifyReport(total_rows=len(merged), mismatches=mismatches)
 
 
+def taifex_instruments() -> list:
+    """config 內所有以 TAIFEX 為主源的期貨 instrument（宣告順序）。"""
+    from config import load_config
+    cfg = load_config()
+    return [i for i in cfg.data.instruments
+            if getattr(i.asset_class, "value", i.asset_class) == "futures"
+            and i.source == "taifex"]
+
+
 def run_and_report(start: date, end: date) -> int:
-    report = cross_verify(start, end)
-    if report.skipped:
-        print(f"[交叉驗證] 未執行：{report.reason}")
+    """對**每個** TAIFEX 期貨 instrument 各跑一次交叉驗證。
+
+    早期只驗第一個（當時 config 僅 TXF 一個真源，兩者等價）。接入 MTX/TMF 後
+    那個寫法會讓哨兵只看大台，卻仍印出「全數通過」——未驗到的商品被說成
+    驗過了，比沒有哨兵更糟。故改為逐商品驗證並逐商品交代結果。
+    """
+    instruments = taifex_instruments()
+    if not instruments:
+        print("[交叉驗證] 未執行：config 無 taifex 期貨 instrument")
         return 0
-    print(f"[交叉驗證] 比對 {report.total_rows} 列（{start} ~ {end}）")
-    if report.passed:
-        print("[交叉驗證] 全數通過（零告警）")
+
+    mismatch_frames = []
+    for inst in instruments:
+        report = cross_verify(start, end, instrument=inst)
+        tag = f"[交叉驗證][{inst.id}]"
+        if report.skipped:
+            print(f"{tag} 未執行：{report.reason}")
+            continue
+        print(f"{tag} 比對 {report.total_rows} 列（{start} ~ {end}）")
+        if report.passed:
+            print(f"{tag} 全數通過（零告警）")
+            continue
+        mismatches = report.mismatches.copy()
+        mismatches.insert(0, "instrument", inst.id)
+        mismatch_frames.append(mismatches)
+        print(f"{tag} ⚠ 超差 {len(mismatches)} 列")
+        print(mismatches.head(10).to_string(index=False))
+
+    if not mismatch_frames:
         return 0
+    all_mismatches = pd.concat(mismatch_frames, ignore_index=True)
     os.makedirs("data", exist_ok=True)
     out = "data/verify_futures_report.csv"
-    report.mismatches.to_csv(out, index=False)
-    print(f"[交叉驗證] ⚠ 超差 {len(report.mismatches)} 列——報表：{out}")
-    print(report.mismatches.head(10).to_string(index=False))
+    all_mismatches.to_csv(out, index=False)
+    print(f"[交叉驗證] ⚠ 合計超差 {len(all_mismatches)} 列——報表：{out}")
     return 1
 
 
