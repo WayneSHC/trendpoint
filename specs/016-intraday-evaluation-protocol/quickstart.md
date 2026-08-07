@@ -16,14 +16,21 @@ pytest -q                          # 基線須全綠
 需要真實取數的步驟一律在 GitHub Actions runner 上執行
 （沿用 `research_b_segment.yml` 的既有理由）。本機驗證走 `--offline-csv-dir`。
 
+**先產生示範累積歷史**（下列場景共用；合成資料，隨時可重新產生，
+故刻意不提交進版本庫——憲章原則 VI）：
+
+```bash
+python tests/fixtures_016_intraday.py /tmp/demo_state
+```
+
 ---
 
 ## 場景 1：確定性（US1 / SC-001）
 
 ```bash
-python run_intraday_eval.py evaluate --state-dir tests/fixtures/016_accumulated \
+python run_intraday_eval.py evaluate --state-dir /tmp/demo_state \
     --out-json /tmp/a.json
-python run_intraday_eval.py evaluate --state-dir tests/fixtures/016_accumulated \
+python run_intraday_eval.py evaluate --state-dir /tmp/demo_state \
     --out-json /tmp/b.json
 python - <<'PY'
 import json
@@ -41,7 +48,7 @@ PY
 ## 場景 2：效力標籤與離散度（US1 / SC-002、SC-003）
 
 ```bash
-python run_intraday_eval.py evaluate --state-dir tests/fixtures/016_accumulated \
+python run_intraday_eval.py evaluate --state-dir /tmp/demo_state \
     --out-json /tmp/r.json
 python - <<'PY'
 import json
@@ -63,26 +70,23 @@ PY
 ## 場景 3：零交易可解釋（US1 / SC-004）
 
 ```bash
-python run_intraday_eval.py evaluate --state-dir tests/fixtures/016_zero_trade \
-    --out-json /tmp/z.json
-python -c "
-import json; r=json.load(open('/tmp/z.json'))
-for t in r['results']['per_ticker']:
-    if t['trades']==0:
-        assert t['zero_trade_cause'] in {'no_structure_signal','filters_rejected_all',
-            'all_candidates_blocked_by_position','entered_but_never_exited'}, t
-print('零交易分解 OK')"
+pytest -q tests/test_intraday_report.py -k zero_trade
 ```
 
-**預期**：2026-08-06 實測的三檔（2330 / 2454 / 2308）皆得到分類，
-無「原因不明」。
+**預期**：四種成因各自被正確分類，且完整管線（含納入準則）走到底時
+零交易仍有成因。
+
+⚠ **一個實作時才浮現的陷阱**：完全無波動的序列（`flat_frame`）不能拿來測
+這條路徑——它的唯一價差為 0，`tick_ratio` 回傳 1.0，會在**納入準則**階段
+就被排除，根本走不到評估層。用它測會拿到綠燈卻沒覆蓋到報告層。
+完整管線的零交易須用 `quiet_frame`（保留一個微小但真實的檔位）。
 
 ---
 
 ## 場景 4：納入準則的擾動不敏感（US2 / SC-005、SC-006）
 
 ```bash
-python run_intraday_eval.py universe --state-dir tests/fixtures/016_accumulated
+python run_intraday_eval.py universe --state-dir /tmp/demo_state
 pytest -q tests/test_intraday_universe.py
 ```
 
@@ -120,7 +124,7 @@ pytest -q tests/test_intraday_snapshot.py -k window
 ## 場景 7：尺度掃描（US4 / SC-010）
 
 ```bash
-python run_intraday_eval.py evaluate --state-dir tests/fixtures/016_accumulated \
+python run_intraday_eval.py evaluate --state-dir /tmp/demo_state \
     --scale-sweep --out-json /tmp/s.json
 python -c "
 import json; s=json.load(open('/tmp/s.json'))['results']['scale_sweep']
@@ -148,7 +152,7 @@ python run_backtest.py   # 與實作前逐筆逐欄相同
 ## 場景 9：無有效性宣稱（SC-012）
 
 ```bash
-pytest -q tests/test_intraday_report.py -k wording
+pytest -q tests/test_intraday_report.py -k efficacy
 ```
 
 **預期**：報告全文的措辭清單命中數為 0
@@ -176,14 +180,14 @@ pytest -q tests/test_intraday_report.py -k wording
 | SC-001 | 場景 1；`tests/test_intraday_report.py::test_determinism` |
 | SC-002 | 場景 2；`test_intraday_report.py::test_every_perf_has_label` |
 | SC-003 | 場景 2；`test_intraday_report.py::test_pooled_has_dispersion` |
-| SC-004 | 場景 3；`test_intraday_report.py::test_zero_trade_cause_exhaustive` |
+| SC-004 | 場景 3；`test_zero_trade_cause_exhaustive` + `test_zero_trade_survives_full_pipeline` |
 | SC-005 | 場景 4；`test_intraday_universe.py::test_perturbation_insensitive` |
 | SC-006 | 場景 4；`test_intraday_universe.py::test_exclusion_traceable` |
 | SC-007 | 場景 5；`test_intraday_snapshot.py::test_merge_no_dup_no_disorder` |
-| SC-008 | 場景 6；`test_intraday_snapshot.py::test_window_*` |
-| SC-009 | 場景 5；`test_intraday_snapshot.py::test_chain_break_reported` |
-| SC-010 | 場景 7；`test_intraday_report.py::test_scale_sweep_curve` |
-| SC-011 | 場景 8；`test_intraday_isolation.py`（靜態零引用 + 基準 fixture） |
-| SC-012 | 場景 9；`test_intraday_report.py::test_no_efficacy_claims` |
+| SC-008 | 場景 6；`test_window_insufficient_reports_shortfall` / `test_window_splits_disjoint_when_sufficient` / `test_window_does_not_cross_gap` |
+| SC-009 | 場景 5；`test_intraday_snapshot.py::test_accumulate_offline_builds_chain` + `test_intraday_report.py::test_chain_break_surfaces_in_report` |
+| SC-010 | 場景 7；`test_scale_sweep_curve` + `test_verdict_requires_measurement` |
+| SC-011 | 場景 8；`test_production_path_does_not_import_feature_modules` + `test_daily_production_path_unchanged` |
+| SC-012 | 場景 9；`test_no_efficacy_claims_in_json` / `_in_text` / `_under_every_label` |
 | SC-013 | `pytest -q` 全綠；本表即「每條 SC 對應測試」的證據 |
 | 場景 10 | `[MANUAL]` —— 跨 run 的 artifact 傳遞無法在單機測試中重現 |

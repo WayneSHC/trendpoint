@@ -392,24 +392,27 @@ def verdict(info: dict, p, n_trades: int | None) -> None:
     else:
         print("  ✅ 資料量充足（可跑滿長週期參數）。")
 
-    # 資料夠但交易少，與資料不夠是**不同的問題**，處方也不同：
-    # 前者要改參數尺度，後者要換資料源。混為一談會走錯路。
+    # 資料夠但交易少，與資料不夠是**不同的問題**。但「交易少 ⇒ 參數尺度問題」
+    # 是**假設，不是量測結論**——本腳本沒有跑尺度掃描，就沒有資格開這個處方。
+    # 舊版在此無條件輸出「先做參數時框化」，而同一份實測顯示四道濾網單道通過率
+    # 皆在 24–70% 正常範圍、無一因尺度失效（spec 016 FR-018 因此禁止該行為）。
     if n_trades is None:
         print("     （--data-only 模式，未評估交易樣本量）")
     elif n_trades < MIN_TRADES_FOR_INFERENCE:
         print()
-        print(f"  ⚠ **但完成交易僅 {n_trades} 筆**——資料夠，訊號卻不夠。")
-        print("     這不是資料源問題，是**參數尺度問題**：日線調校的週期套到 5 分線，")
-        print(f"     structure_period={HARDCODED_STRUCTURE_PERIOD} 從 10 個交易日縮成 50 分鐘、")
-        print(f"     ma_period={p.ma_period} 從 9.5 個月縮成 3.7 個交易日。")
-        print("     → 先做**參數時框化**（讓參數帶時框語意，而非一組共用根數），")
-        print("       再重跑本評估。在那之前不要下『盤中系統沒用』的結論。")
+        print(f"  ⚠ **完成交易僅 {n_trades} 筆**——資料量夠，但交易樣本量不夠。")
+        print("     本腳本只陳述這個事實，不指定成因。")
+        print("     成因需以**量測**判定，而非推測：")
+        print("       python run_intraday_eval.py evaluate --scale-sweep")
+        print("     該掃描輸出各週期倍率下的逐道通過率與交易數。曲線平坦即代表")
+        print("     參數尺度不是瓶頸——那是推翻「需先做參數時框化」的證據，")
+        print("     不是實作它的理由。")
     else:
         print()
         print(f"  ✅ 完成交易 {n_trades} 筆，樣本量足以進入下一步：")
-        print("     walk-forward 切分 + 與日線基準的消融對照。")
-        print("     並處理參數時框化——同一組根數在兩個時框下語意不同，")
-        print("     不先解決這點，多時框只是把不一致從兩條路徑擴大到 N 條。")
+        print("     樣本外切分 + 與日線基準的消融對照（走 run_intraday_eval.py）。")
+        print("     ——樣本量足夠**不等於**策略有效；在樣本外驗證與摩擦成本")
+        print("     敏感度分析之前，不得據此宣稱盤中系統可用（憲章原則 III）。")
 
 
 def main() -> None:

@@ -492,6 +492,109 @@ class MaAlertConfig(BaseModel):
         }
 
 
+class IntradayEvaluationConfig(BaseModel):
+    """
+    盤中時框評估協定（spec 016）。
+
+    **這是研究流程設定，不是策略參數**——與 `MaAlertConfig` / `OutcomeTrackingConfig`
+    同一判準：不進回測的訊號路徑、不影響任何生產訊號、不該被 optimizer 掃描。
+
+    **本區塊的門檻決定「結論能不能被引用」，不決定「策略好不好」**。
+    尤其 `min_test_windows` / `min_trades_per_window` 是效力標籤的升級門檻——
+    調鬆它們不會讓策略變好，只會讓報告更早開始說一句它還沒資格說的話。
+    """
+    lookback_days: int = Field(
+        default=20,
+        ge=1,
+        description="納入準則的判定窗長度（交易日）。位於評估窗**之前**且不重疊——"
+                    "用評估窗自身資料判定納入是選擇偏誤的時序版本（research.md R5）"
+    )
+    min_avg_daily_volume: float = Field(
+        default=1_000_000.0,
+        gt=0,
+        description="納入準則：lookback 期間日均量下限"
+    )
+    max_gap_ratio: float = Field(
+        default=0.02,
+        ge=0.0, le=1.0,
+        description="納入準則：盤中缺口根數比率上限"
+    )
+    max_bars_per_day_cv: float = Field(
+        default=0.25,
+        ge=0.0,
+        description="納入準則：每日根數變異係數上限"
+    )
+    max_tick_ratio: float = Field(
+        default=0.005,
+        gt=0.0,
+        description="納入準則：價格檔位粒度（最小非零價差 / 價格）上限"
+    )
+    excluded_tickers: List[str] = Field(
+        default_factory=lambda: ["00631L.TW"],
+        description="顯式排除清單。槓桿／反向 ETF 的複利路徑相依性使其日內報酬與"
+                    "一般現貨不可比，混入會讓跨標的離散度失去意義"
+    )
+    min_test_windows: int = Field(
+        default=3,
+        ge=1,
+        description="效力標籤升級所需的**互不重疊**測試窗數下限"
+    )
+    min_trades_per_window: int = Field(
+        default=30,
+        ge=1,
+        description="效力標籤升級所需的每窗每標的來回交易數下限。"
+                    "低於此值時任何期望值/PF 的信賴區間都寬到無法據以決策"
+    )
+    train_ratio: float = Field(
+        default=0.7,
+        gt=0.0, lt=1.0,
+        description="每組窗口中訓練段佔比；其餘為測試段"
+    )
+    scale_factors: List[float] = Field(
+        default_factory=lambda: [0.25, 0.5, 1.0, 2.0, 4.0],
+        description="參數尺度掃描的倍率。**倍率而非絕對值**——要回答的是"
+                    "「尺度是否為瓶頸」，不是「哪個值最好」（後者是調參，明列範圍外）"
+    )
+    state_dir: str = Field(
+        default="accumulated",
+        description="累積歷史目錄。**不得置於 data/ 之下**——該目錄整體 gitignored"
+    )
+
+    @model_validator(mode="after")
+    def _validate(self) -> "IntradayEvaluationConfig":
+        if not self.scale_factors:
+            raise ValueError("intraday_evaluation.scale_factors 不得為空")
+        if any(f <= 0 for f in self.scale_factors):
+            raise ValueError(
+                f"intraday_evaluation.scale_factors 必須皆為正數：{self.scale_factors}"
+            )
+        if list(self.scale_factors) != sorted(set(self.scale_factors)):
+            raise ValueError(
+                f"intraday_evaluation.scale_factors 必須嚴格遞增且不重複："
+                f"{self.scale_factors}"
+            )
+        # 1.0 必須在列——沒有它就沒有「未縮放」的對照點，整條曲線失去基準，
+        # 「尺度不是瓶頸」這個反證也就無從讀出（research.md R7）。
+        if not any(abs(f - 1.0) < 1e-9 for f in self.scale_factors):
+            raise ValueError(
+                f"intraday_evaluation.scale_factors 必須包含 1.0 作為對照基準："
+                f"{self.scale_factors}"
+            )
+        cleaned = self.state_dir.strip()
+        if not cleaned:
+            raise ValueError("intraday_evaluation.state_dir 不得為空")
+        # 與 OutcomeTrackingConfig.log_dir 同一失效模式：落入 data/ 會被 .gitignore
+        # 吞掉。此處後果更嚴重——累積歷史不可再生成（60 天窗一過永久取不回）。
+        normalized = cleaned.replace("\\", "/").lstrip("./")
+        if normalized == "data" or normalized.startswith("data/"):
+            raise ValueError(
+                f"intraday_evaluation.state_dir 不得位於 data/ 之下（得到 "
+                f"'{self.state_dir}'）：該目錄整體被 .gitignore，而累積歷史"
+                "不可再生成，靜默遺失即永久遺失"
+            )
+        return self
+
+
 class SystemConfig(BaseModel):
     """
     全域系統配置規格模型
@@ -504,6 +607,10 @@ class SystemConfig(BaseModel):
     data_quality: DataQualityConfig = Field(default_factory=DataQualityConfig)
     # spec 014：均線觸價通知（通知偏好，與策略參數分離——見 MaAlertConfig docstring）
     alerts: MaAlertConfig = Field(default_factory=MaAlertConfig)
+    # spec 016：盤中時框評估協定（研究流程設定，不進生產訊號路徑）
+    intraday_evaluation: IntradayEvaluationConfig = Field(
+        default_factory=IntradayEvaluationConfig
+    )
 
     @model_validator(mode="after")
     def _no_short_on_equity_overrides(self) -> "SystemConfig":

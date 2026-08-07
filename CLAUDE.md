@@ -140,6 +140,21 @@ python monitor_signals.py --once   # 單次訊號檢測與推播
   （訊號層抑制 BOS 會讓 `~bos` 互斥條件放行原本被排除的 MSS，等於改寫訊號定義）；
   **只接續勢分支**，MSS 反轉分支不傳（該路徑已內建自己的位移量能確認，
   再套一次即雙重套用）。是否改為預設啟用需 B 段實測（SC-010）；
+  `016`（盤中時框評估協定，`specs/016-intraday-evaluation-protocol`）**已實作**——
+  `intraday_snapshot.py`（快照正規化/指紋、累積合併、斷裂偵測、gap-aware 切分）
+  ＋`intraday_universe.py`（事前客觀的納入準則）＋`intraday_report.py`
+  （逐標的報告、效力標籤、零交易分解、尺度掃描）＋`run_intraday_eval.py`（CLI）。
+  **協定已就位，但尚未累積出任何樣本外結論**——累積是時間的函數，
+  `intraday_accumulate.yml` 每週跑一次、artifact 保留 90 天（裁決 D1 的兩項
+  代價：斷鏈風險與公開 artifact 曝光，已知並接受，非已解決）。
+  三條紅線：(1) 效力標籤是累積狀態的**純函式**，呼叫端不得指定——可指定的話
+  FR-005 形同虛設；(2) 合併採**先到者為準**，資料源的事後修正不得覆寫早先的
+  評估窗（那是把未來資訊回填進過去的判定）；(3) 納入準則只讀**評估窗之前**的
+  lookback，用評估窗自身資料判定納入是選擇偏誤的時序版本。
+  生產路徑零改動由 `tests/test_intraday_isolation.py` 焊死（靜態零引用
+  ＋逐欄基準對照，基準凍結於 `tests/fixtures/016_baseline_daily.json`）。
+  **在累積長度足以切出樣本外窗口之前，本案的所有數字都是樣本內描述性統計**，
+  不得宣稱盤中系統可用；
   `004~006` 見各 spec.md 狀態。新功能走 Spec Kit：
   `/speckit-specify` → `/speckit-plan` → `/speckit-tasks` → `/speckit-implement`
 - 理論：`three_bands_theory.md`、`docs/ladder-optimization-research.md`（階梯優化研究，

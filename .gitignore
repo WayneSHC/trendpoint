@@ -21,6 +21,11 @@ venv/
 # 且 Yahoo Finance 資料公開再散布有授權疑慮（health review 發現 2.x）
 data/
 
+# spec 016：盤中評估的累積歷史。**本機執行產物**不進版本庫——
+# 正式的累積鏈走 GitHub Actions artifact（spec 016 裁決 D1），
+# 本機跑出來的只是暫存，混進版本庫會與 artifact 那條鏈分岔。
+accumulated/
+
 # 本地來源文件（內容已轉換為 docs/*.md 或屬內部文件，不進公開 repo）
 多空階梯*.txt
 產品需求文件*

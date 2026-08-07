@@ -1,0 +1,174 @@
+name: TrendPoint - 盤中歷史累積與評估（spec 016）
+
+# 本工作流程是 spec 016 裁決 D1 的實作：累積歷史存於 Actions artifact，
+# 每次執行取回前次、合併去重、上傳為新的 artifact。
+#
+# **為什麼需要累積**：yfinance 對 5m 的回溯上限是 60 天（Yahoo 硬限制），
+# 單次取數不可能覆蓋樣本外驗證所需的長度。累積是唯一路徑，而累積是**時間的
+# 函數**——這條鏈上線的日子就是起算點。
+#
+# **為什麼需要 runner 而非本機**：開發容器的 agent proxy 對行情來源回 403
+# （CONNECT 政策拒絕），但 GitHub runner 可達（alert_scheduler.yml 每 30 分鐘
+# 實抓 yfinance 已長期證實）。
+#
+# ⚠ **兩項已知代價，經裁決接受，不得當成已解決**（spec.md D1）：
+#
+#   1. artifact 保留期上限 90 天是平台硬上限。排程一旦中斷超過保留期，
+#      **整條累積歸零重來**。故 cron 設為每週一次——遠低於上限，單次失敗
+#      不致斷鏈（FR-022）。改動 cron 前請一併檢視 retention-days，
+#      兩者是同一條約束的兩端。
+#   2. 公開 repo 的 artifact 任何人可下載。`.gitignore` 排除 `data/` 的理由
+#      （Yahoo 資料再散布授權疑慮）在此並未消解，只是改由 artifact 承載。
+#
+# **本工作流程唯讀**：不寫 DB、不改組態、不入庫、不推播。
+
+on:
+  schedule:
+    # 每週六 01:00 UTC（台北週六 09:00）——週五收盤後、下週開盤前。
+    # 每週一次遠低於 90 天保留期，單次失敗不致斷鏈（FR-022）。
+    - cron: '0 1 * * 6'
+  workflow_dispatch:
+    inputs:
+      tickers:
+        description: '取數目標（空白分隔）。非納入清單——納入由準則決定'
+        type: string
+        default: '2330.TW 2454.TW 2317.TW 0050.TW 00878.TW 00919.TW'
+      period:
+        description: '回溯期間（上限 60d——Yahoo 對 5m 的硬限制）'
+        type: string
+        default: '60d'
+      scale_sweep:
+        description: '加跑參數尺度掃描（較耗時）'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read        # gh run list / gh run download 取回前次 artifact 所需
+
+concurrency:
+  # 兩個 run 同時合併同一條鏈會產生分岔的累積歷史，且先寫者的結果被靜默覆蓋。
+  group: intraday-accumulate
+  cancel-in-progress: false
+
+env:
+  ARTIFACT_NAME: intraday-accumulated
+  STATE_DIR: accumulated
+
+jobs:
+  accumulate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: 檢出專案程式碼
+        uses: actions/checkout@v5
+
+      - name: 設定 Python 環境
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: 安裝相依套件
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # 刻意鎖定「最近一次**成功**的 run」：失敗的 run 可能只上傳了半份資料，
+      # 拿它續接會把破損資料寫進鏈裡。取不到時**不失敗**——三種成因
+      # （首次執行／逾 90 天保留期／上次 run 失敗）對資料的後果相同，
+      # 但必須顯式回報而非靜默從零開始（FR-023）。
+      - name: 取回前次累積歷史
+        id: restore
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          mkdir -p "$STATE_DIR"
+          prev=$(gh run list \
+            --workflow "${{ github.workflow }}" \
+            --status success \
+            --limit 1 \
+            --json databaseId \
+            --jq '.[0].databaseId' 2>/dev/null || true)
+          if [ -z "$prev" ] || [ "$prev" = "null" ]; then
+            echo "chain_broken=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::找不到前次成功的 run —— 累積鏈自本次重新起算"
+            exit 0
+          fi
+          if gh run download "$prev" -n "$ARTIFACT_NAME" -D restored 2>/dev/null; then
+            if [ -d "restored/$STATE_DIR" ]; then
+              cp -r "restored/$STATE_DIR/." "$STATE_DIR/"
+              echo "chain_broken=false" >> "$GITHUB_OUTPUT"
+              echo "已自 run $prev 取回累積歷史"
+              ls -la "$STATE_DIR"
+            else
+              echo "chain_broken=true" >> "$GITHUB_OUTPUT"
+              echo "::warning::run $prev 的 artifact 不含 $STATE_DIR —— 鏈結重新起算"
+            fi
+          else
+            echo "chain_broken=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::run $prev 的 artifact 取不回（可能已逾 90 天保留期）—— 鏈結重新起算"
+          fi
+
+      - name: 取數並併入累積歷史
+        env:
+          TICKERS: ${{ inputs.tickers || '2330.TW 2454.TW 2317.TW 0050.TW 00878.TW 00919.TW' }}
+          PERIOD: ${{ inputs.period || '60d' }}
+        run: |
+          python run_intraday_eval.py accumulate \
+            --tickers "$TICKERS" \
+            --period "$PERIOD" \
+            --state-dir "$STATE_DIR"
+
+      # 指紋是「結論綁定到資料版本」的機制：yfinance 對同一請求會回傳浮動數值
+      # （0050 相隔 56 分鐘兩次執行得 7 → 5 個來回），沒有指紋就無法區分
+      # 「結論變了」與「資料變了」。
+      - name: 記錄資料指紋
+        if: always()
+        run: |
+          mkdir -p artifacts
+          {
+            echo "# 盤中累積歷史指紋"
+            echo "# run_id=${{ github.run_id }}  sha=${{ github.sha }}  utc=$(date -u +%FT%TZ)"
+            echo "# chain_broken=${{ steps.restore.outputs.chain_broken }}"
+            echo "# 欄位：sha256  行數  檔案"
+            for f in "$STATE_DIR"/*.csv; do
+              [ -e "$f" ] || continue
+              printf '%s  %s  %s\n' \
+                "$(sha256sum "$f" | cut -d' ' -f1)" "$(wc -l < "$f")" "$f"
+            done
+          } | tee artifacts/data_fingerprint.txt
+
+      - name: 產出評估報告
+        if: always()
+        run: |
+          mkdir -p artifacts
+          SWEEP=""
+          if [ "${{ inputs.scale_sweep }}" = "true" ]; then SWEEP="--scale-sweep"; fi
+          python run_intraday_eval.py evaluate \
+            --state-dir "$STATE_DIR" \
+            --out-json artifacts/report.json \
+            --out-text artifacts/report.txt $SWEEP || \
+            echo "::warning::評估未產出報告（可能無標的通過納入準則）"
+
+      - name: 報告摘要
+        if: always()
+        run: |
+          if [ -f artifacts/report.txt ]; then
+            cat artifacts/report.txt >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # retention-days 為平台上限 90。與上方 cron 的每週頻率是同一條約束的
+      # 兩端——改動任一端前須一併檢視另一端（FR-022）。
+      - name: 上傳累積歷史與報告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: intraday-accumulated
+          path: |
+            accumulated/
+            artifacts/
+          retention-days: 90
+          if-no-files-found: warn

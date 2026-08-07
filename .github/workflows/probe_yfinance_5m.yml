@@ -12,10 +12,17 @@ name: TrendPoint - 盤中時框可行性評估（yfinance 5 分線，手動觸�
 # （CONNECT 政策拒絕），但 GitHub runner 可達——`alert_scheduler.yml` 每 30 分鐘
 # 實抓 yfinance 已長期證實（同 research_b_segment.yml 的理由）。
 #
-# **本工作流程唯讀**：不寫 DB、不改組態、不入庫。產出為文字報告與（選用的）
-# CSV 快照 artifact，供人工判讀。CSV 一併保留是為了**可重現**——yfinance 對
-# 同一請求會回傳浮動數值（research_b_segment.yml 已記錄此現象），沒有快照就
-# 無法區分「結論變了」與「資料變了」。
+# **本工作流程唯讀**：不寫 DB、不改組態、不入庫。產出為文字報告，供人工判讀。
+#
+# ⚠ **快照產生方式已收斂**（spec 016 FR-024）：本工作流程原本另存一份
+# `data/*_5m.csv` 並單獨上傳，與 `intraday_accumulate.yml` 的累積鏈形成兩套
+# 並行的快照路徑——同一份資料有兩個來源、兩種保留期、兩組指紋，遲早分岔。
+# 現改為併入同一套累積機制：本檔只做**單次診斷**（回答「這份資料跑不跑得出
+# 統計意義」），跨執行的累積、去重、切分與效力標籤一律走
+# `run_intraday_eval.py` 與 `intraday_accumulate.yml`。
+#
+# 需要可重現的快照時，請取用累積鏈的 artifact（`intraday-accumulated`），
+# 而非本工作流程的產出。
 
 on:
   workflow_dispatch:
@@ -56,43 +63,24 @@ jobs:
           TICKERS: ${{ inputs.tickers }}
           PERIOD: ${{ inputs.period }}
         run: |
-          mkdir -p artifacts data
+          mkdir -p artifacts
           rc=0
           for t in $TICKERS; do
             safe=$(echo "$t" | tr '.' '_')
             echo "::group::$t"
             python run_5m_evaluation.py \
               --fetch "$t" --period "$PERIOD" \
-              --save-csv "data/${safe}_5m.csv" \
               2>&1 | tee "artifacts/eval_${safe}.txt" || rc=1
             echo "::endgroup::"
           done
           exit $rc
 
-      # 資料指紋：yfinance 對相同請求會回傳浮動數值（見 research_b_segment.yml
-      # 的實測記錄）。沒有指紋就無法區分「結論變了」與「資料變了」。
-      - name: 記錄資料指紋
-        if: always()
-        run: |
-          {
-            echo "# 5m 評估輸入指紋"
-            echo "# run_id=${{ github.run_id }}  sha=${{ github.sha }}  utc=$(date -u +%FT%TZ)"
-            echo "# 欄位：sha256  行數  檔案"
-            for f in data/*_5m.csv; do
-              [ -e "$f" ] || continue
-              printf '%s  %s  %s\n' \
-                "$(sha256sum "$f" | cut -d' ' -f1)" "$(wc -l < "$f")" "$f"
-            done
-          } | tee artifacts/data_fingerprint.txt
-
-      - name: 收集 CSV 快照
-        if: always()
-        run: mkdir -p artifacts/data && cp -v data/*_5m.csv artifacts/data/ 2>/dev/null || echo "（無 CSV）"
-
-      - name: 上傳報告與資料快照
+      # 快照不在此產生（FR-024）：可重現的資料版本一律來自累積鏈的
+      # `intraday-accumulated` artifact。本工作流程只留文字診斷。
+      - name: 上傳診斷報告
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: yfinance-5m-eval-${{ github.run_id }}
+          name: yfinance-5m-probe-${{ github.run_id }}
           path: artifacts/
           retention-days: 30
