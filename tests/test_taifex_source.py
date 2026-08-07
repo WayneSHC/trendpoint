@@ -179,6 +179,40 @@ def test_parse_failfast_when_every_row_rejected_by_session():
     assert "Regular" in str(e.value)          # 要印出實際看到的值才好診斷
 
 
+def test_parse_all_after_hours_returns_empty_instead_of_raising():
+    """整批皆為**盤後**不是格式異常——是一般盤尚未結算，回空即可。
+
+    盤中查當日必然如此：TAIFEX 當日端點在一般盤收盤前只有前一夜的盤後列。
+    run 31137879960（台北 09:24 觸發）就因此整輪匯入紅掉、B 段實測被 skip。
+
+    與上一條測試的分界：那裡的 'Regular'/'After-Hours' 是**沒見過**的值，
+    代表 TAIFEX 可能改了標示，必須大聲壞掉；'盤後' 是我們認得且刻意排除的值。
+    """
+    ad, _ = _adapter()
+    text = (
+        "Date,Contract,ContractMonth(Week),Open,High,Low,Last,Volume,"
+        "SettlementPrice,OpenInterest,TradingSession\n"
+        "20260807,TX,202608,45450,45450,44464,44715,57782,44700,110864,盤後\n"
+        "20260807,TX,202609,45400,45500,44400,44700,1200,44690,5000,盤後\n"
+    )
+    df = ad._parse_csv(text, commodity="TX")
+    assert df.empty, "全盤後應回空，而非拋錯或誤收盤後價"
+
+
+def test_parse_mixed_unknown_and_known_excluded_sessions_still_failfast():
+    """已知排除值混入未知值時仍須 fail-fast——不得被 '盤後' 稀釋掉警訊。"""
+    ad, _ = _adapter()
+    text = (
+        "Date,Contract,ContractMonth(Week),Open,High,Low,Last,Volume,"
+        "SettlementPrice,OpenInterest,TradingSession\n"
+        "20260807,TX,202608,45450,45450,44464,44715,57782,44700,110864,盤後\n"
+        "20260807,TX,202609,45400,45500,44400,44700,1200,44690,5000,Regular\n"
+    )
+    with pytest.raises(ValueError) as e:
+        ad._parse_csv(text, commodity="TX")
+    assert "Regular" in str(e.value)
+
+
 def test_parse_no_session_column_is_not_a_session_failure():
     """2017-05 前的檔案沒有交易時段欄——視為一般，不得誤觸防呆。"""
     ad, _ = _adapter()
