@@ -54,6 +54,44 @@ def _tickers_with_data(db_path: str, tickers: List[str]) -> List[str]:
         ]
 
 
+#: 正式的事後表現紀錄目錄。測試一律不得寫入此處。
+_REAL_ALERT_LOG = project_root / "alert_log"
+
+
+@pytest.fixture(autouse=True)
+def _isolate_alert_log(tmp_path, monkeypatch):
+    """把 spec 015 的觀察紀錄目錄改指到 tmp（**全測試自動套用**）。
+
+    為什麼要在 conftest 做，而不是各測試自己傳 log_dir：
+
+    `alert_log/` 是**進版本庫的原始觀察**——不可再生成，且 CI 會 `git add`
+    它。任何走 monitor 真實路徑的測試，只要讀到正式組態，就會把
+    `TEST.TW`、`close=80.0`、`bar_time=2024-02-29` 這種 fixture 列寫進去，
+    然後被自動提交，混進真正的樣本裡再也分不出來。
+
+    這個缺陷在總開關關閉時**完全不會顯現**——關閉時 recorder 不寫檔。它
+    在啟用的那一刻才出現，而啟用正是 spec 015 的目的。實測（2026-08-12）
+    五個測試檔會污染：`test_bos_volume_monitor`、`test_micro_index_instrument`、
+    `test_monitor_short`、`test_monitor_signals`、`test_real_data_integration`。
+
+    逐檔修不夠：第六個走同一條路徑的測試會再犯一次，而症狀是安靜的。
+    故改在制度層一次擋掉，並由 `test_no_test_writes_to_real_alert_log`
+    斷言此保護有效。
+    """
+    import monitor_signals
+
+    # **要改的是 monitor 手上那一份，不是新載一份。** `load_config()` 每次
+    # 呼叫都回一個新的 SystemConfig；改新載的那份等於改了一個沒人在用的
+    # 物件，隔離看起來生效、實際完全沒作用。monitor 的組態是模組層的
+    # `monitor_signals.cfg`，在 import 時就固定了。
+    monkeypatch.setattr(
+        monitor_signals.cfg.alerts.outcome_tracking,
+        "log_dir",
+        str(tmp_path / "alert_log"),
+    )
+    yield
+
+
 @pytest.fixture(scope="session")
 def tickers_with_data():
     """
