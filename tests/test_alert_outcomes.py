@@ -429,12 +429,24 @@ def test_sc018_log_dir_outside_data_is_accepted():
 
 
 def test_sc018_yaml_carries_the_block():
-    """組態必須真的存在於 config.yaml，而非只靠 Pydantic 預設值。"""
+    """組態必須真的存在於 config.yaml，而非只靠 Pydantic 預設值。
+
+    **這裡刻意不釘住 `enabled` 的值。** 本測試要守的是「這個區塊有沒有被
+    寫進 YAML」——只靠 Pydantic 預設值的話，使用者打開 config.yaml 看不到
+    這個功能存在，也就無從開關。至於它此刻是開是關，屬於運轉決策而非
+    不變式；把當時的值釘進測試，會讓「啟用這個功能」這件正常操作
+    變成一次紅燈。
+
+    預設關閉這條保證由 ``test_sc018_defaults_are_off`` 守（那才是不變式：
+    未給組態時 Pydantic 必須回 False），與本測試分工不同。
+    """
     import yaml
     with open(os.path.join(REPO_ROOT, "config", "config.yaml"), encoding="utf-8") as fh:
         raw = yaml.safe_load(fh)
     block = raw["alerts"]["outcome_tracking"]
-    assert block["enabled"] is False
+    assert isinstance(block["enabled"], bool)
+    # log_dir 不得落在 data/ 之下：該目錄整體 gitignored，而事後表現紀錄
+    # 是不可再生成的原始觀察，掉了就沒了。這條才是真正的不變式。
     assert not str(block["log_dir"]).startswith("data")
 
 
