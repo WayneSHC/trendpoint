@@ -57,7 +57,7 @@
 | `BEARISH_BOS` | −1 | `:242` | 同上 |
 | `BREAK_UPPER_BAND` | +1 | `:251` | 同上 |
 | `BREAK_LOWER_BAND` | −1 | `:259` | 同上 |
-| 均線觸價（spec 014，四條線各一型） | −1 | `:279` `check_ma_touch_alerts` | `daily` |
+| 均線觸價（spec 014，每條線各一型；2026-09-01 起含週線共五條） | −1 | `:279` `check_ma_touch_alerts` | `daily` |
 
 均線觸價為**向下穿越**事件（spec 014 FR-004），方向恆為 `−1`。
 

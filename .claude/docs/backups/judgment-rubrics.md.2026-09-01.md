@@ -107,21 +107,6 @@
   多半涵蓋不到這些路徑），並為每段新執行到的程式碼補測試鎖住邊界條件（PR #20 即補了
   端點 bar 日期 ==／>／< 庫內末根三態）。沒被執行過的程式碼等同未測試碼，測試綠也一樣。
 
-- 坑：spec 014 新增「週線」後，`alert_outcomes._DIRECTION_BY_ALERT` 漏登記
-  `MA_CROSS_BELOW_WEEKLY`，但 `pytest -q` 全綠、雲端實跑也「成功」。後果不是拋錯，
-  是 `_OutcomeRecorder` 的故障隔離把 ValueError 吞成一行提示——**推播照發、
-  該線的樣本永遠不進 `alert_log/`**，整條線的觀察資料靜默消失。
-  為什麼：兩個本該擋住它的測試都把清單寫死了。
-  `test_all_monitor_alert_types_are_registered` 手寫四條線名，
-  `test_sc003_ma_alerts_are_recorded_as_daily` 硬要 `== 4`——而週線被丟棄後
-  剛好又湊回 4 列，於是**期望值跟著 bug 一起「對」**。
-  下次怎麼做：凡「N 個型別／N 條線／N 個欄位都要登記」型的測試，期望集合一律
-  **由單一來源導出**（`ma_lines.LINE_LABELS`、`cfg.alerts.all_periods()`），
-  禁止在測試裡重打一份清單——測試重打的清單會跟著程式一起漏。
-  另外：模組有「吞例外只印提示」的故障隔離時（本 repo 為 `_OutcomeRecorder`、
-  `init_sent_alerts_db`），該路徑的缺陷**不會讓任何東西變紅**，必須靠導出式
-  斷言涵蓋；只看綠燈與「雲端跑成功」都證明不了它有在做事。
-
 ## 6. 誠實條款：這套制度補不了的東西
 
 拆解、驗證、多樣本評審能補**執行品質**；補不了**模糊題與品味判斷**

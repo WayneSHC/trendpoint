@@ -225,13 +225,21 @@ def test_sc003_records_carry_fingerprint_and_timeframe(env):
 
 
 def test_sc003_ma_alerts_are_recorded_as_daily(env):
-    """均線告警走日線去重粒度 → timeframe 標 daily、bar_time 為交易日。"""
+    """
+    均線告警走日線去重粒度 → timeframe 標 daily、bar_time 為交易日。
+
+    期望列數**由組態導出**，不寫死。寫死 4 的那版在 2026-09-01 新增週線後
+    仍然通過——因為週線的方向漏登記、紀錄被靜默丟棄，剛好又湊回 4 列。
+    一個會跟著 bug 一起「對」的期望值等於沒有期望值。
+    """
     env.set_intraday(intraday_frame("cross_below", level=FLAT_LEVEL, n_days=2))
     env.seed_daily(n=300, base=FLAT_LEVEL, slope=0.0)
-    env.configure(tracking=True, ma_alerts=True)
+    cfg = env.configure(tracking=True, ma_alerts=True)
+    expected_lines = len(cfg.enabled_periods())
+    assert expected_lines >= 4, "組態應啟用多條均線，否則本測試失去鑑別力"
     env.run()
     ma_records = [r for r in env.records() if r["alert_type"].startswith("MA_")]
-    assert len(ma_records) == 4, "四條均線各應留下一列"
+    assert len(ma_records) == expected_lines, "每條啟用的均線各應留下一列"
     for rec in ma_records:
         assert rec["timeframe"] == "daily"
         assert rec["direction"] == -1
