@@ -611,6 +611,33 @@ def check_ma_touch_alerts(ticker, alert_mgr, instrument, *,
             recorder.mark_notified(ticker, trade_date, alert_type)
 
 
+def build_sample_ma_snapshot() -> str:
+    """
+    `--test-alert` 用的均線現況**樣本**區塊（固定假值，不取行情、不讀 DB）。
+
+    為什麼測試訊息要附這個：自 2026-09-01 起每則推播都帶均線現況區塊，而該區塊
+    含分隔線與全形括號——它在 LINE 上排版正不正常，**只有實機收得到才知道**。
+    `--test-alert` 的用途是「驗證推播管道運作正常」，新格式顯示不正常就不算正常，
+    故納入。真實行情不在此處取：測試指令必須能在沒有 DB、沒有網路的環境跑完。
+
+    總開關關閉時回傳空字串——測試訊息的長相隨之回到擴充前，與正式推播一致。
+    """
+    import ma_lines
+
+    periods = cfg.alerts.enabled_periods()
+    if not periods:
+        return ""
+
+    # 固定樣本：比較價 100，各線依序略低於它（乖離由 +1% 遞增至 +5%），
+    # 使五條線的數值互不相同，排版錯位時一眼看得出來。
+    price = 100.0
+    ordered = ma_lines.ordered_line_names(periods)
+    ma_set = {name: price / (1 + 0.01 * (i + 1)) for i, name in enumerate(ordered)}
+
+    return (ma_lines.format_ma_snapshot(ma_set, periods, price)
+            + "\n（上方為固定樣本值，非真實行情——本訊息僅測試推播管道與排版）")
+
+
 def report_test_alert_result(alert_mgr, sent: bool) -> int:
     """
     回報 --test-alert 的真實結果並決定結束碼。
@@ -672,6 +699,7 @@ def main():
         # 等於未送出卻聲稱成功。改為條件句，成立與否由收件端自證。
         test_msg = ("<b>【TrendPoint 系統測試】</b>\n這是一筆來自系統的測試警報。\n"
                     "若您收到這則訊息，表示推播管道運作正常。")
+        test_msg += build_sample_ma_snapshot()
         sent = alert_mgr.send_alert(test_msg)
         return report_test_alert_result(alert_mgr, sent)
 
