@@ -12,7 +12,8 @@ spec 014 T003／T005：`ma_lines` 純函式契約測試。
 import pandas as pd
 import pytest
 
-from ma_lines import compute_ma_set, detect_cross_below
+from ma_lines import (INSUFFICIENT_LABEL, SNAPSHOT_HEADER, SNAPSHOT_NOTE,
+                      compute_ma_set, detect_cross_below, format_ma_snapshot)
 from tests.ma_fixtures import daily_frame
 
 PERIODS = {"monthly": 20, "quarterly": 60, "half_yearly": 120, "yearly": 240}
@@ -136,3 +137,62 @@ def test_upward_cross_never_triggers():
 
 def test_all_none_returns_empty_list():
     assert detect_cross_below(200.0, 1.0, {"yearly": None}) == []
+
+
+# ---------------------------------------------------------------------------
+# format_ma_snapshot：附在每則推播尾端的「均線現況」區塊
+# ---------------------------------------------------------------------------
+
+_SNAPSHOT_PERIODS = {"yearly": 240, "weekly": 5, "monthly": 20, "quarterly": 60}
+
+
+def test_snapshot_lists_every_line_shortest_first():
+    """
+    呈現順序由週期長短決定，不受 dict 插入順序影響——訊息裡的順序若會漂移，
+    使用者每次都得重新找哪一行是哪條線。
+    """
+    ma = {"weekly": 105.0, "monthly": 100.0, "quarterly": 95.0, "yearly": 90.0}
+    block = format_ma_snapshot(ma, _SNAPSHOT_PERIODS, price=99.0)
+
+    body = block.strip().splitlines()
+    assert body[0] == SNAPSHOT_HEADER
+    assert body[1] == SNAPSHOT_NOTE
+    assert [line.split(" (")[0] for line in body[2:]] == ["週線", "月線", "季線", "年線"]
+
+
+def test_snapshot_shows_value_and_deviation_against_price():
+    """每行含均線值（兩位小數）與相對比較價的乖離。"""
+    block = format_ma_snapshot({"monthly": 100.0}, {"monthly": 20}, price=99.0)
+    assert "月線 (20 日): 100.00（-1.00%）" in block
+
+
+def test_snapshot_marks_insufficient_lines_instead_of_dropping_them():
+    """
+    資料不足之線顯示「資料不足」而**不是略過**：漏掉一行會讓使用者以為
+    那條線不存在，而真相是「算不出來」——兩者在決策上完全不同。
+    """
+    ma = {"weekly": 105.0, "yearly": None}
+    block = format_ma_snapshot(ma, {"weekly": 5, "yearly": 240}, price=99.0)
+
+    assert f"年線 (240 日): {INSUFFICIENT_LABEL}" in block
+    assert "週線 (5 日): 105.00" in block
+
+
+def test_snapshot_is_empty_when_no_periods_enabled():
+    """全線關閉／總開關關閉 → 空字串，呼叫端可無條件串接。"""
+    assert format_ma_snapshot({}, {}, price=99.0) == ""
+
+
+def test_snapshot_starts_with_blank_line_separator():
+    """以空行與訊息本文分隔——直接串接即可，呼叫端不需自行補換行。"""
+    block = format_ma_snapshot({"monthly": 100.0}, {"monthly": 20}, price=99.0)
+    assert block.startswith("\n\n")
+
+
+def test_snapshot_does_not_reuse_the_cross_alert_deviation_label():
+    """
+    現況區塊刻意不含「乖離:」字樣——跌破通知以該欄位標示「觸發的是哪條線」，
+    兩者若共用同一字樣，訊息裡的主從關係就消失了。
+    """
+    block = format_ma_snapshot({"monthly": 100.0}, {"monthly": 20}, price=99.0)
+    assert "乖離:" not in block

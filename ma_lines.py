@@ -121,6 +121,7 @@ def ordered_line_names(periods: Dict[str, int]) -> List[str]:
 
 # 線別 → 中文顯示名稱。通知訊息與儀表板共用，避免兩處各自維護而漂移。
 LINE_LABELS: Dict[str, str] = {
+    "weekly": "週線",
     "monthly": "月線",
     "quarterly": "季線",
     "half_yearly": "半年線",
@@ -140,6 +141,61 @@ def alert_type_for(name: str) -> str:
     與既有六種告警（BULLISH_MSS 等）無命名衝突。
     """
     return f"MA_CROSS_BELOW_{name.upper()}"
+
+
+# 「均線現況」區塊的標題行。推播訊息與測試共用單一來源——測試以此辨識區塊，
+# 兩處各寫一份字面值會在改文案時讓測試悄悄失去鑑別力。
+SNAPSHOT_HEADER = "── 均線現況 ──"
+
+# 說明行。刻意**不含**「乖離:」字樣：既有的跌破通知以該欄位標示「觸發的是哪條
+# 線」，若現況區塊也出現同樣字樣，兩者在訊息裡就分不出主從。
+SNAPSHOT_NOTE = "（日線 SMA，截至前一交易日；括號為現價乖離）"
+
+# 資料不足之線的顯示文字。**不得**顯示空白或 0——後者會與「價格恰在均線上」
+# 混淆（同 FR-013 對儀表板現況表的要求）。
+INSUFFICIENT_LABEL = "資料不足"
+
+
+def format_ma_snapshot(ma_set: Dict[str, Optional[float]],
+                       periods: Dict[str, int],
+                       price: float) -> str:
+    """
+    產生可直接附在推播訊息尾端的「均線現況」文字區塊。
+
+    這是**狀態播報**，與 `detect_cross_below` 的**事件**語意刻意並存：
+    穿越通知回答「剛剛發生什麼」，本區塊回答「現在各條線在哪」。使用者要在
+    收到任何一則推播時就看得到全部均線位置，不必回頭查儀表板。
+
+    參數:
+        ma_set: `compute_ma_set` 的輸出（線別 → 均線值或 None）。
+        periods: {線別: 週期根數}；**呈現順序由此決定**（短→長）。
+        price: 比較價（5 分線已收盤棒的收盤價），用於計算乖離。
+
+    回傳:
+        以兩個換行起首的區塊字串，可直接串接於訊息之後；
+        `periods` 為空（總開關關閉或全線關閉）時回傳**空字串**——
+        呼叫端無條件串接即可，不需自行判斷。
+
+    資料不足之線顯示「資料不足」而非略過：漏掉一行會讓使用者以為那條線
+    不存在，而真相是「算不出來」——兩者在決策上完全不同。
+
+    本函式不做 I/O、不讀 config，格式化以外不含任何判定邏輯。
+    """
+    if not periods:
+        return ""
+
+    lines = [SNAPSHOT_HEADER, SNAPSHOT_NOTE]
+    for name in ordered_line_names(periods):
+        label = f"{line_label(name)} ({periods[name]} 日)"
+        ma = ma_set.get(name)
+        if ma is None:
+            lines.append(f"{label}: {INSUFFICIENT_LABEL}")
+            continue
+        dev = deviation_pct(price, ma)
+        dev_text = "" if dev is None else f"（{dev:+.2%}）"
+        lines.append(f"{label}: {ma:.2f}{dev_text}")
+
+    return "\n\n" + "\n".join(lines)
 
 
 def build_status_rows(daily_close: pd.Series,
