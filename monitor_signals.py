@@ -384,6 +384,16 @@ def check_new_signals(ticker: str, alert_mgr: AlertManager, instrument=None):
     recorder = make_outcome_recorder(ticker)
     tf_label = "daily" if bar_interval >= pd.Timedelta(days=1) else "5m"
 
+    # 3.5 均線脈絡（spec 014 擴充）：日線表**只讀一次**，同時供
+    #     (a) 附加在每則推播尾端的「均線現況」區塊
+    #     (b) 下方訊號 D 的向下穿越判定
+    # 分兩次讀會讓同一則訊息裡的「觸發線均線值」與「現況區塊的同一條線」
+    # 可能取自不同快照而互相矛盾。總開關關閉／期貨標的時回傳 None。
+    ma_ctx = build_ma_context(ticker, instrument,
+                              latest_time=latest_time, is_futures=is_futures,
+                              price=float(latest_bar['close']))
+    ma_note = ma_ctx["snapshot"] if ma_ctx else ""
+
     # 4. 判定與推播訊號
     # 訊號 A：MSS 結構破壞 (1為多頭突破，-1為空頭突破)
     # 訊號決策採用上一根已關閉 K 線的訊號，防範看前偏誤與訊號飄移
@@ -393,7 +403,7 @@ def check_new_signals(ticker: str, alert_mgr: AlertManager, instrument=None):
         recorder.record(ticker, latest_time, alert_type, tf_label, latest_bar)
         if not is_alert_already_sent(ticker, latest_time, alert_type):
             msg = f"<b>【多頭反轉訊號】</b>\n標的: {inst_label}\n時間: {latest_time}\n價格: {latest_bar['close']:.2f}\n說明: 偵測到最新 K 線看漲 MSS 結構破壞，大成交量突破前高，趨勢可能反轉向上！\n當前階梯參考價: {latest_bar['ladder']:.2f}"
-            if alert_mgr.send_alert(mock_prefix + msg + intraday_note):
+            if alert_mgr.send_alert(mock_prefix + msg + ma_note + intraday_note):
                 mark_alert_as_sent(ticker, latest_time, alert_type)
                 recorder.mark_notified(ticker, latest_time, alert_type)
                 
@@ -403,7 +413,7 @@ def check_new_signals(ticker: str, alert_mgr: AlertManager, instrument=None):
         recorder.record(ticker, latest_time, alert_type, tf_label, latest_bar)
         if not is_alert_already_sent(ticker, latest_time, alert_type):
             msg = f"<b>【空頭反轉訊號】</b>\n標的: {inst_label}\n時間: {latest_time}\n價格: {latest_bar['close']:.2f}\n說明: 偵測到最新 K 線看跌 MSS 結構破壞，大成交量跌破前低，趨勢可能反向做空！\n當前階梯參考價: {latest_bar['ladder']:.2f}"
-            if alert_mgr.send_alert(mock_prefix + msg + intraday_note):
+            if alert_mgr.send_alert(mock_prefix + msg + ma_note + intraday_note):
                 mark_alert_as_sent(ticker, latest_time, alert_type)
                 recorder.mark_notified(ticker, latest_time, alert_type)
 
@@ -417,7 +427,7 @@ def check_new_signals(ticker: str, alert_mgr: AlertManager, instrument=None):
         recorder.record(ticker, latest_time, alert_type, tf_label, latest_bar)
         if not is_alert_already_sent(ticker, latest_time, alert_type):
             msg = f"<b>【多頭趨勢延續】</b>\n標的: {inst_label}\n時間: {latest_time}\n價格: {latest_bar['close']:.2f}\n說明: 偵測到 BOS 結構連續突破，多頭力道持續加強！\n當前階梯參考價: {latest_bar['ladder']:.2f}"
-            if alert_mgr.send_alert(mock_prefix + msg + intraday_note):
+            if alert_mgr.send_alert(mock_prefix + msg + ma_note + intraday_note):
                 mark_alert_as_sent(ticker, latest_time, alert_type)
                 recorder.mark_notified(ticker, latest_time, alert_type)
                 
@@ -427,7 +437,7 @@ def check_new_signals(ticker: str, alert_mgr: AlertManager, instrument=None):
         recorder.record(ticker, latest_time, alert_type, tf_label, latest_bar)
         if not is_alert_already_sent(ticker, latest_time, alert_type):
             msg = f"<b>【空頭趨勢延續】</b>\n標的: {inst_label}\n時間: {latest_time}\n價格: {latest_bar['close']:.2f}\n說明: 偵測到 BOS 結構連續跌破，空頭趨勢強烈加壓！\n當前階梯參考價: {latest_bar['ladder']:.2f}"
-            if alert_mgr.send_alert(mock_prefix + msg + intraday_note):
+            if alert_mgr.send_alert(mock_prefix + msg + ma_note + intraday_note):
                 mark_alert_as_sent(ticker, latest_time, alert_type)
                 recorder.mark_notified(ticker, latest_time, alert_type)
 
@@ -439,7 +449,7 @@ def check_new_signals(ticker: str, alert_mgr: AlertManager, instrument=None):
         recorder.record(ticker, latest_time, alert_type, tf_label, latest_bar)
         if not is_alert_already_sent(ticker, latest_time, alert_type):
             msg = f"<b>【突破上關價】</b>\n標的: {inst_label}\n時間: {latest_time}\n價格: {latest_bar['close']:.2f}\n說明: 價格收盤強勢站上昨日三關價之上關位 ({latest_bar['upper_price']:.2f})！多頭波段進入強勢區域。"
-            if alert_mgr.send_alert(mock_prefix + msg + intraday_note):
+            if alert_mgr.send_alert(mock_prefix + msg + ma_note + intraday_note):
                 mark_alert_as_sent(ticker, latest_time, alert_type)
                 recorder.mark_notified(ticker, latest_time, alert_type)
                 
@@ -450,73 +460,74 @@ def check_new_signals(ticker: str, alert_mgr: AlertManager, instrument=None):
         recorder.record(ticker, latest_time, alert_type, tf_label, latest_bar)
         if not is_alert_already_sent(ticker, latest_time, alert_type):
             msg = f"<b>【跌破下關價】</b>\n標的: {inst_label}\n時間: {latest_time}\n價格: {latest_bar['close']:.2f}\n說明: 價格收盤跌破昨日三關價之下關位 ({latest_bar['lower_price']:.2f})！空頭波段進入弱勢區域。"
-            if alert_mgr.send_alert(mock_prefix + msg + intraday_note):
+            if alert_mgr.send_alert(mock_prefix + msg + ma_note + intraday_note):
                 mark_alert_as_sent(ticker, latest_time, alert_type)
                 recorder.mark_notified(ticker, latest_time, alert_type)
 
-    # 訊號 D（spec 014）：均線觸價通知（月／季／半年／年線）
+    # 訊號 D（spec 014）：均線觸價通知（週／月／季／半年／年線）
     # ------------------------------------------------------------------
     # 這是**額外一段**，不是上方任何邏輯的替換。上方六種告警走 5 分線即時
-    # 路徑（現貨；刻意設計，見 CLAUDE.md 監控段），本段另行讀取日線表——
-    # 年線需要 240 根**日線**，5 天的 5 分線（約 270 根 5 分鐘棒）算不出來。
-    # 兩條資料路徑並存；**嚴禁**把上方的 fetch_stock_data 改成日線（會使既有
-    # 六種告警全部改判、行為徹底改變）。
+    # 路徑（現貨；刻意設計，見 CLAUDE.md 監控段），均線則取自日線表（3.5 段
+    # 已讀入 ma_ctx）——年線需要 240 根**日線**，5 天的 5 分線（約 270 根
+    # 5 分鐘棒）算不出來。兩條資料路徑並存；**嚴禁**把上方的 fetch_stock_data
+    # 改成日線（會使既有六種告警全部改判、行為徹底改變）。
     check_ma_touch_alerts(ticker, alert_mgr, instrument,
                           latest_bar=latest_bar, prev_bar=prev_bar,
                           latest_time=latest_time, is_futures=is_futures,
                           mock_prefix=mock_prefix, intraday_note=intraday_note,
-                          recorder=recorder)
+                          recorder=recorder, ma_ctx=ma_ctx)
 
     # spec 015：本輪紀錄一次寫回（單次檔案 I/O）。總開關關閉時為 no-op。
     recorder.flush()
 
 
-def check_ma_touch_alerts(ticker, alert_mgr, instrument, *,
-                          latest_bar, prev_bar, latest_time,
-                          is_futures: bool, mock_prefix: str, intraday_note: str,
-                          recorder=None):
+# `ma_ctx` 參數的「未提供」哨兵。不能用 None——None 是 build_ma_context 的
+# **合法回傳值**（功能關閉／期貨／日線表不可用），兩者混用會讓已經算過且
+# 判定為 None 的情形被重算一次，日線表讀取失敗的提示因而印兩遍。
+_MA_CTX_UNSET = object()
+
+
+def build_ma_context(ticker, instrument, *, latest_time, is_futures: bool,
+                     price: float):
     """
-    均線觸價通知（spec 014）：股價向下穿越月／季／半年／年線時推播。
+    建立本輪的均線脈絡：**讀一次**日線表，算出各線均線值與可附加於推播訊息
+    尾端的「均線現況」區塊。
 
-    時基刻意混合（spec 014 FR-002／FR-003）：
-      - **均線**取自 DB 日線表（已收盤、盤中執行時為前一交易日為止）
-      - **比較價**取自呼叫端傳入的 5 分線已收盤棒
+    回傳 `{"periods", "ma_set", "snapshot"}`，或在下列情形回傳 `None`
+    （呼叫端一律以 `if ctx` 判斷，不需分辨原因）：
 
-    因為使用者要知道的是「**現在**跌到均線了」，而非「昨天收在均線下」。
+      - 總開關關閉或全線關閉 → **完全短路，不讀日線表**（SC-001 第二層）
+      - 期貨標的 → FR-010：連續表經 back-adjust，早年價位與當年真實市價脫節
+        （spec 011 的核心問題），其「年線」在價位語意上不可靠。
+        **這也是期貨推播不附均線現況的原因**——一個語意不可靠的價位放進
+        訊息裡，比不放更糟：使用者無從得知它不可靠。
+      - 日線表讀取失敗／不存在／為空 → 印提示後略過（FR-012：不中斷其他標的）
 
-    去重粒度為「每標的每線每**交易日**至多一則」——`bar_time` 填交易日而非
-    K 線時間戳。這與上方六種告警（填 K 線時間戳、每根至多一則）**刻意不同**：
-    均線在同一交易日內是常數，同一天內的多次穿越指的是同一件事。
-    **請勿為了「一致」而把兩者統一。**
+    時基刻意混合（spec 014 FR-002／FR-003）：**均線**取自 DB 日線表（已收盤），
+    **比較價／乖離基準**為呼叫端傳入的 5 分線已收盤棒收盤價。
     """
-    if recorder is None:
-        recorder = _NullRecorder()
-
     periods = cfg.alerts.enabled_periods()
     if not periods:
-        return                      # 總開關關閉或四條線全關 → 完全短路，不讀日線表
+        return None
 
     if is_futures:
-        # FR-010：期貨連續表經 back-adjust，早年價位與當年真實市價脫節
-        # （spec 011 的核心問題），其「年線」在價位語意上不可靠，明確排除。
-        return
+        return None
 
     from db_security import safe_load_db_data, table_name_for
     from instruments import equity_instrument
     import ma_lines
 
     inst = instrument if instrument is not None else equity_instrument(ticker)
-    inst_label = instrument_label(ticker, inst)
     try:
         daily = safe_load_db_data(DB_PATH, table_name_for(inst, "daily"))
     except Exception as e:
         # FR-012：不得中斷其他標的的監控
         print(f"提示：{ticker} 均線通知略過——日線表讀取失敗（{e}）。")
-        return
+        return None
 
     if daily is None or daily.empty or 'close' not in daily.columns:
         print(f"提示：{ticker} 均線通知略過——日線資料不存在或為空（請先執行 run_ingestion）。")
-        return
+        return None
 
     # FR-002：僅使用已收盤日線。盤中執行時 DB 內最新日線本就是前一交易日
     # （ingestion 排程於收盤後執行），但收盤後執行的情境可能已含當日，
@@ -526,6 +537,48 @@ def check_ma_touch_alerts(ticker, alert_mgr, instrument, *,
     daily_close = daily_close[daily_close.index.normalize() < today]
 
     ma_set = ma_lines.compute_ma_set(daily_close, periods)
+    return {
+        "periods": periods,
+        "ma_set": ma_set,
+        "snapshot": ma_lines.format_ma_snapshot(ma_set, periods, price),
+    }
+
+
+def check_ma_touch_alerts(ticker, alert_mgr, instrument, *,
+                          latest_bar, prev_bar, latest_time,
+                          is_futures: bool, mock_prefix: str, intraday_note: str,
+                          recorder=None, ma_ctx=_MA_CTX_UNSET):
+    """
+    均線觸價通知（spec 014）：股價向下穿越週／月／季／半年／年線時推播。
+
+    均線值與「均線現況」區塊由 `build_ma_context` 提供；呼叫端已建好時以
+    `ma_ctx` 傳入（`check_new_signals` 的路徑），未提供則自行建立。
+
+    去重粒度為「每標的每線每**交易日**至多一則」——`bar_time` 填交易日而非
+    K 線時間戳。這與六種結構告警（填 K 線時間戳、每根至多一則）**刻意不同**：
+    均線在同一交易日內是常數，同一天內的多次穿越指的是同一件事。
+    **請勿為了「一致」而把兩者統一。**
+    """
+    if recorder is None:
+        recorder = _NullRecorder()
+
+    if ma_ctx is _MA_CTX_UNSET:
+        ma_ctx = build_ma_context(ticker, instrument, latest_time=latest_time,
+                                  is_futures=is_futures,
+                                  price=float(latest_bar['close']))
+    if ma_ctx is None:
+        return
+
+    import ma_lines
+    from instruments import equity_instrument
+
+    inst = instrument if instrument is not None else equity_instrument(ticker)
+    inst_label = instrument_label(ticker, inst)
+
+    periods = ma_ctx["periods"]
+    ma_set = ma_ctx["ma_set"]
+    ma_note = ma_ctx["snapshot"]
+
     triggered = ma_lines.detect_cross_below(
         prev_price=float(prev_bar['close']),
         curr_price=float(latest_bar['close']),
@@ -547,11 +600,13 @@ def check_ma_touch_alerts(ticker, alert_mgr, instrument, *,
             continue
         dev = ma_lines.deviation_pct(price, ma_value)
         label = ma_lines.line_label(name)
+        # 「{label} ({period} 日)」與「乖離:」兩欄標示**觸發的是哪條線**，
+        # 與尾端全線現況區塊為主從關係——現況區塊刻意不使用同樣字樣。
         msg = (f"<b>【跌破{label}】</b>\n標的: {inst_label}\n時間: {latest_time}\n"
                f"價格: {price:.2f}\n{label} ({periods[name]} 日): {ma_value:.2f}\n"
                f"乖離: {dev:+.2%}\n"
                f"說明: 股價向下觸及或跌破{label}，請評估後續。")
-        if alert_mgr.send_alert(mock_prefix + msg + intraday_note):
+        if alert_mgr.send_alert(mock_prefix + msg + ma_note + intraday_note):
             mark_alert_as_sent(ticker, trade_date, alert_type)
             recorder.mark_notified(ticker, trade_date, alert_type)
 

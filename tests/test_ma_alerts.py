@@ -115,15 +115,21 @@ def _ma_alert_types(rows):
     return {r[2] for r in rows if r[2].startswith("MA_CROSS_BELOW_")}
 
 
+# 均線通知的標題集合。自 LINE_LABELS 導出而非寫死字面值——新增線別時
+# （如本次的週線）測試會自動涵蓋，不會悄悄漏掉一條。
+_MA_TITLES = tuple(f"<b>【跌破{label}】" for label in ma_lines.LINE_LABELS.values())
+
+
 def _is_ma_msg(msg: str) -> bool:
     """
     辨識均線通知訊息。
 
-    以「乖離:」欄位為判準——既有六種告警皆無此欄位。刻意不用「跌破」二字：
-    既有的「跌破下關價」與「BOS 結構連續跌破」也含該詞，用它會誤計
-    （本測試初版即因此誤判為 6 則）。
+    以**標題**為判準。刻意不用「乖離:」欄位：自「均線現況」區塊附加到每則
+    推播之後，該欄位不再是均線通知獨有（初版即以此判別，會把帶現況區塊的
+    結構告警一併誤計）。也不能只看「跌破」二字——既有的「跌破下關價」與
+    「BOS 結構連續跌破」同樣含該詞。
     """
-    return "乖離:" in msg
+    return msg.startswith(_MA_TITLES)
 
 
 def _ma_msgs(mgr):
@@ -208,19 +214,20 @@ def test_sc001_layer3_enabling_does_not_change_legacy_alerts(env):
 # ---------------------------------------------------------------------------
 
 def test_sc002_cross_below_triggers_each_line_once(env):
-    """SC-002：自均線上方跌破 → 四條線各發出且僅發出一則。"""
-    env.seed_daily()                                    # 四條均線皆 = 100.0
+    """SC-002：自均線上方跌破 → 五條線各發出且僅發出一則。"""
+    env.seed_daily()                                    # 五條均線皆 = 100.0
     env.set_intraday(intraday_frame("cross_below", FLAT_LEVEL, n_days=2))
     env.set_alerts(_alerts_on())
 
     mgr = env.run()
 
     assert _ma_alert_types(env.sent_rows()) == {
+        "MA_CROSS_BELOW_WEEKLY",
         "MA_CROSS_BELOW_MONTHLY", "MA_CROSS_BELOW_QUARTERLY",
         "MA_CROSS_BELOW_HALF_YEARLY", "MA_CROSS_BELOW_YEARLY",
     }
     ma_msgs = _ma_msgs(mgr)
-    assert len(ma_msgs) == 4, f"應發出 4 則均線通知，實際 {len(ma_msgs)}"
+    assert len(ma_msgs) == 5, f"應發出 5 則均線通知，實際 {len(ma_msgs)}"
 
 
 def test_sc003_persisting_below_does_not_realert(env):
@@ -324,6 +331,98 @@ def test_futures_instrument_is_excluded(env):
 
 
 # ---------------------------------------------------------------------------
+# 均線現況區塊：附加於**每一則**推播（含既有六種結構告警）
+# ---------------------------------------------------------------------------
+
+_ALL_LINE_LABELS = ("週線 (5 日)", "月線 (20 日)", "季線 (60 日)",
+                    "半年線 (120 日)", "年線 (240 日)")
+
+
+def test_snapshot_appended_to_structural_alerts(env):
+    """
+    功能開啟時，六種結構告警的訊息尾端也帶「均線現況」全線列表——
+    使用者收到任何一則推播就看得到均線位置，不必回頭查儀表板。
+    """
+    env.seed_daily()
+    env.set_alerts(_alerts_on())
+
+    mgr = env.run()
+
+    structural = [msg for msg in mgr.messages if not _is_ma_msg(msg)]
+    assert structural, "本情境應至少產生一則結構告警，否則測試失去鑑別力"
+    for msg in structural:
+        assert ma_lines.SNAPSHOT_HEADER in msg, f"結構告警缺少均線現況區塊: {msg[:40]}"
+        for label in _ALL_LINE_LABELS:
+            assert label in msg, f"均線現況缺少 {label}"
+
+
+def test_snapshot_appended_to_ma_cross_alerts(env):
+    """均線跌破通知同樣帶全線現況——被跌破的那條仍由標題與「乖離:」欄標示。"""
+    env.seed_daily()
+    env.set_intraday(intraday_frame("cross_below", FLAT_LEVEL, n_days=2))
+    env.set_alerts(_alerts_on())
+
+    mgr = env.run()
+
+    ma_msgs = _ma_msgs(mgr)
+    assert ma_msgs
+    for msg in ma_msgs:
+        assert ma_lines.SNAPSHOT_HEADER in msg
+        assert "乖離:" in msg, "觸發線的標示欄不得被現況區塊取代"
+
+
+def test_snapshot_absent_when_master_switch_off(env):
+    """
+    總開關關閉 → 訊息與實作前逐字相同（凍結基準亦已涵蓋；此處明寫其意圖）。
+    """
+    env.seed_daily()
+    env.set_alerts(MaAlertConfig())
+
+    mgr = env.run()
+
+    assert mgr.messages, "本情境應至少產生一則告警"
+    for msg in mgr.messages:
+        assert ma_lines.SNAPSHOT_HEADER not in msg
+
+
+def test_daily_table_read_once_per_run(env, monkeypatch):
+    """
+    日線表**每輪只讀一次**：現況區塊與穿越判定共用同一份快照。
+    分兩次讀會讓同一則訊息裡的「觸發線均線值」與現況區塊的同一條線互相矛盾。
+    """
+    calls = []
+    import db_security
+    real = db_security.safe_load_db_data
+
+    def counting_loader(db_path, table_name):
+        calls.append(table_name)
+        return real(db_path, table_name)
+
+    monkeypatch.setattr(db_security, "safe_load_db_data", counting_loader)
+
+    env.seed_daily()
+    env.set_intraday(intraday_frame("cross_below", FLAT_LEVEL, n_days=2))
+    env.set_alerts(_alerts_on())
+    env.run()
+
+    assert len(calls) == 1, f"日線表應只讀一次，實際 {len(calls)} 次：{calls}"
+
+
+def test_futures_get_no_snapshot(env):
+    """
+    FR-010 的延伸：期貨連續表經 back-adjust，其均線價位語意不可靠，故
+    **不附現況區塊**——把不可靠的價位放進訊息比不放更糟（使用者無從得知）。
+    """
+    env.seed_daily()
+    env.set_alerts(_alerts_on())
+
+    ctx = m.build_ma_context(TICKER, None,
+                             latest_time=pd.Timestamp("2026-06-02 13:25:00"),
+                             is_futures=True, price=100.0)
+    assert ctx is None
+
+
+# ---------------------------------------------------------------------------
 # T011：SC-007 開關
 # ---------------------------------------------------------------------------
 
@@ -340,7 +439,7 @@ def test_sc007_individual_line_can_be_disabled(env):
     """單線關閉 → 該線不發，其餘線正常。"""
     env.seed_daily()
     env.set_intraday(intraday_frame("cross_below", FLAT_LEVEL, n_days=2))
-    env.set_alerts(_alerts_on(yearly=False, half_yearly=False))
+    env.set_alerts(_alerts_on(weekly=False, yearly=False, half_yearly=False))
 
     env.run()
     assert _ma_alert_types(env.sent_rows()) == {
@@ -354,7 +453,7 @@ def test_sc007_individual_line_can_be_disabled(env):
 
 def test_sc005_insufficient_daily_data_skips_only_long_lines(env):
     """
-    SC-005：僅 100 根日線 → 月線與季線正常、半年線與年線不發，
+    SC-005：僅 100 根日線 → 週線、月線與季線正常、半年線與年線不發，
     且單一條線的不足不影響其他線。
     """
     env.seed_daily(n=100)
@@ -364,6 +463,7 @@ def test_sc005_insufficient_daily_data_skips_only_long_lines(env):
     env.run()
 
     assert _ma_alert_types(env.sent_rows()) == {
+        "MA_CROSS_BELOW_WEEKLY",
         "MA_CROSS_BELOW_MONTHLY", "MA_CROSS_BELOW_QUARTERLY",
     }, "半年線與年線在 100 根日線下必須不發"
 
@@ -386,7 +486,7 @@ def test_ma_uses_only_closed_daily_bars(env):
     # 比較價：自 100 之上跌到 99 —— 若當日被計入使均線 < 99，則不應觸發
     env.set_intraday(intraday_frame("cross_below", FLAT_LEVEL, n_days=2,
                                     start="2026-06-01"))
-    env.set_alerts(_alerts_on(quarterly=False, half_yearly=False, yearly=False))
+    env.set_alerts(_alerts_on(weekly=False, quarterly=False, half_yearly=False, yearly=False))
 
     mgr = env.run()
     ma_msgs = [msg for msg in _ma_msgs(mgr) if "跌破月線" in msg]
@@ -407,7 +507,8 @@ def test_sc011_status_rows_show_position_without_alerting(env):
     rows = ma_lines.build_status_rows(daily["close"], MaAlertConfig().all_periods(),
                                       current_price=90.0)
 
-    assert [r["line"] for r in rows] == ["monthly", "quarterly", "half_yearly", "yearly"]
+    assert [r["line"] for r in rows] == ["weekly", "monthly", "quarterly",
+                                        "half_yearly", "yearly"]
     for r in rows:
         assert r["position"] == "在下"
         assert r["deviation"] == pytest.approx(-0.10)
@@ -424,7 +525,7 @@ def test_sc012_status_rows_mark_insufficient_data(env):
                                       current_price=90.0)
     by_line = {r["line"]: r for r in rows}
 
-    for name in ("monthly", "quarterly"):
+    for name in ("weekly", "monthly", "quarterly"):
         assert by_line[name]["ma"] is not None
         assert by_line[name]["position"] == "在下"
 

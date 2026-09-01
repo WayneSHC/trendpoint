@@ -668,7 +668,7 @@ with tab_price:
         # 「沒收到通知」若被誤讀為「在均線之上」就會出錯。本表即為該盲點的補集：
         # **推播回答「剛剛發生什麼」，本表回答「現在是什麼狀態」**。
         # 只讀不發——本區塊不觸發任何推播（FR-014）。
-        with st.expander("均線現況（月／季／半年／年線）", expanded=False):
+        with st.expander("均線現況（週／月／季／半年／年線）", expanded=False):
             try:
                 _ma_rows = ma_lines.build_status_rows(
                     df_kline['close'],

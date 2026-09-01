@@ -513,6 +513,11 @@ class MaAlertConfig(BaseModel):
         default=False,
         description="均線觸價通知總開關。**預設關閉**——新增的通知類型不應在使用者未要求時自行啟用"
     )
+    # 週線（5 日）為 spec 014 之後追加。週期短、穿越極頻繁，故它同時是
+    # **訊息裡的參考價位**與觸發線——若日後推播量過大，優先關的是這一條。
+    weekly: MaLineConfig = Field(
+        default_factory=lambda: MaLineConfig(period=5), description="週線"
+    )
     monthly: MaLineConfig = Field(
         default_factory=lambda: MaLineConfig(period=20), description="月線"
     )
@@ -538,6 +543,7 @@ class MaAlertConfig(BaseModel):
         return {
             name: line.period
             for name, line in (
+                ("weekly", self.weekly),
                 ("monthly", self.monthly),
                 ("quarterly", self.quarterly),
                 ("half_yearly", self.half_yearly),
@@ -547,8 +553,9 @@ class MaAlertConfig(BaseModel):
         }
 
     def all_periods(self) -> Dict[str, int]:
-        """回傳四條線的週期（不受開關影響）——供儀表板現況表使用（US4）。"""
+        """回傳全部線別的週期（不受開關影響）——供儀表板現況表使用（US4）。"""
         return {
+            "weekly": self.weekly.period,
             "monthly": self.monthly.period,
             "quarterly": self.quarterly.period,
             "half_yearly": self.half_yearly.period,
