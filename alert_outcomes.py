@@ -33,6 +33,10 @@ from typing import Dict, List, Optional, Sequence
 
 import pandas as pd
 
+# 通知層 → 通知層的單向依賴：`ma_lines` 只依賴 pandas，不碰訊號／回測模組，
+# 故不影響 SC-019 的零引用焊死（那條禁的是訊號鏈引用本模組）。
+import ma_lines
+
 # ---------------------------------------------------------------------------
 # 常數
 # ---------------------------------------------------------------------------
@@ -66,7 +70,6 @@ _IMMUTABLE_FIELDS = tuple(
 )
 
 #: `alert_type` → 方向。看多 +1／看空 −1。
-#: 均線觸價（spec 014）為**向下穿越**事件，方向恆為 −1。
 _DIRECTION_BY_ALERT = {
     "BULLISH_MSS": 1,
     "BEARISH_MSS": -1,
@@ -74,10 +77,12 @@ _DIRECTION_BY_ALERT = {
     "BEARISH_BOS": -1,
     "BREAK_UPPER_BAND": 1,
     "BREAK_LOWER_BAND": -1,
-    "MA_CROSS_BELOW_MONTHLY": -1,
-    "MA_CROSS_BELOW_QUARTERLY": -1,
-    "MA_CROSS_BELOW_HALF_YEARLY": -1,
-    "MA_CROSS_BELOW_YEARLY": -1,
+    # 均線觸價（spec 014）為**向下穿越**事件，方向恆為 −1。**由
+    # `ma_lines.LINE_LABELS` 導出，不逐條寫死**——2026-09-01 新增週線時，
+    # 原本寫死的那份漏了它：`direction_for` 因而拋 ValueError、被
+    # `_OutcomeRecorder` 的故障隔離吞成一行提示，推播照發但該線的樣本
+    # 靜默不進 alert_log。新增線別時這裡會自動跟上。
+    **{ma_lines.alert_type_for(name): -1 for name in ma_lines.LINE_LABELS},
 }
 
 

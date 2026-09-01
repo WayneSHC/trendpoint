@@ -68,14 +68,35 @@ def test_unknown_alert_type_fails_fast():
 
 
 def test_all_monitor_alert_types_are_registered():
-    """monitor 實際會產出的七類告警必須全數登記方向。"""
+    """
+    monitor 實際會產出的告警必須全數登記方向。
+
+    線別**由 `ma_lines.LINE_LABELS` 與 config 兩邊各自導出**，不寫死清單——
+    本測試初版把四條線寫死，2026-09-01 新增週線時它照樣通過，漏登記因而
+    溜過去（見 `test_weekly_line_is_registered` 的事故說明）。兩邊各取一次的
+    用意是：任一邊新增而另一邊沒跟上，都會在這裡爆。
+    """
     import ma_lines
+    from config.config import MaAlertConfig
+
     expected = {"BULLISH_MSS", "BEARISH_MSS", "BULLISH_BOS", "BEARISH_BOS",
                 "BREAK_UPPER_BAND", "BREAK_LOWER_BAND"}
-    for name in ("monthly", "quarterly", "half_yearly", "yearly"):
+    for name in ma_lines.LINE_LABELS:
         expected.add(ma_lines.alert_type_for(name))
+    for name in MaAlertConfig().all_periods():
+        expected.add(ma_lines.alert_type_for(name))
+
     for alert_type in expected:
         assert ao.direction_for(alert_type) in (1, -1)
+
+
+def test_weekly_line_is_registered():
+    """
+    迴歸：2026-09-01 新增週線時漏登記方向。後果不是拋錯中斷——
+    `_OutcomeRecorder` 的故障隔離會把 ValueError 吞成一行提示，
+    **推播照發、但該線的樣本永遠不進 alert_log**，靜默失去整條線的觀察資料。
+    """
+    assert ao.direction_for("MA_CROSS_BELOW_WEEKLY") == -1
 
 
 # ---------------------------------------------------------------------------
