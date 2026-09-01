@@ -385,6 +385,27 @@ def test_snapshot_absent_when_master_switch_off(env):
         assert ma_lines.SNAPSHOT_HEADER not in msg
 
 
+def test_test_alert_message_carries_sample_snapshot(env):
+    """
+    `--test-alert` 的訊息附均線現況**樣本**區塊——該區塊含分隔線與全形括號，
+    在 LINE 上的排版只有實機收得到才驗得到，而「推播管道運作正常」理應涵蓋
+    「新格式顯示正常」。樣本為固定假值，不取行情、不讀 DB。
+    """
+    env.set_alerts(_alerts_on())
+    block = m.build_sample_ma_snapshot()
+
+    assert ma_lines.SNAPSHOT_HEADER in block
+    for label in _ALL_LINE_LABELS:
+        assert label in block, f"樣本區塊缺少 {label}"
+    assert "非真實行情" in block, "樣本值必須明確標示，否則會被當成行情"
+
+
+def test_test_alert_sample_is_empty_when_switch_off(env):
+    """總開關關閉 → 測試訊息回到擴充前的長相，與正式推播一致。"""
+    env.set_alerts(MaAlertConfig())
+    assert m.build_sample_ma_snapshot() == ""
+
+
 def test_daily_table_read_once_per_run(env, monkeypatch):
     """
     日線表**每輪只讀一次**：現況區塊與穿越判定共用同一份快照。
