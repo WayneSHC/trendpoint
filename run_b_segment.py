@@ -57,6 +57,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import pandas as pd
 
 from backtester import BacktestEngine
+from benchmark import buy_and_hold, format_benchmark_line
 from config import load_config
 from db_security import safe_load_db_data, table_name_for
 from instruments import AssetClass, InstrumentRegistry, equity_instrument
@@ -295,7 +296,8 @@ def run_scenarios(df: pd.DataFrame, instrument, cfg,
 def print_report(ticker: str, instrument, calibration: Dict[str, Any],
                  rows: List[Dict[str, Any]],
                  fingerprint: Optional[Dict[str, Any]] = None,
-                 leverage: Optional[float] = None) -> None:
+                 leverage: Optional[float] = None,
+                 bm: Optional[Dict[str, Any]] = None) -> None:
     kind = "期貨（含空方）" if instrument.asset_class == AssetClass.FUTURES else "現貨"
     print(f"\n{'=' * 96}")
     print(f"B 段實測：{ticker}（{kind}）")
@@ -313,6 +315,22 @@ def print_report(ticker: str, instrument, calibration: Dict[str, Any],
         if leverage >= HIGH_LEVERAGE_WARN:
             print("  ⚠ 在此槓桿下，回測結果主要反映的是**槓桿設定**而非策略優劣；"
                   "spec 012/013 的裁決不應以此序列為據。")
+
+    if bm is not None:
+        # 機會成本：在此之前本報告的每個數字都是絕對報酬、沒有對照組。
+        # 曝險必須同時印出——買進持有近 100% 曝險，策略通常遠低於此，
+        # 只比總報酬是不公平的比法（見 benchmark.py 模組 docstring）。
+        print("\n[對照基準] 同期買進持有（含進出場摩擦成本，與策略同一組成本/sizing 元件）")
+        print(format_benchmark_line(bm, label="買進持有"))
+        base_row = next((r for r in rows if r.get("kind") == "baseline"), None)
+        if base_row is not None and bm.get("available"):
+            d_ret = base_row["total_return"] - bm["total_return"]
+            d_shp = base_row["sharpe"] - bm["sharpe_ratio"]
+            d_mdd = base_row["max_drawdown"] - bm["max_drawdown"]
+            print(f"  [策略基準 − 買進持有] 總報酬 {d_ret:+.2%}｜"
+                  f"Sharpe {d_shp:+.2f}｜MDD {d_mdd:+.2%}（正值＝回撤較淺）")
+            print("  ⚠ 曝險不同，總報酬不可單獨比較。**Sharpe 才是可比的那一欄**——"
+                  "若策略在曝險遠低的情況下 Sharpe 仍輸，低曝險的辯護就不成立。")
 
     print("\n[spec 013 SC-015] 回撤門檻校準（蒙地卡羅重抽）")
     if not calibration.get("available"):
@@ -486,7 +504,19 @@ def run(target: Optional[str] = None, n_sims: int = 5000) -> int:
         if inst.asset_class == AssetClass.FUTURES:
             fut = cfg.trading_cost.futures
             lev = fut.margin_utilization / fut.margin_rate if fut.margin_rate else None
-        print_report(inst.id, inst, calibration, rows, fingerprint=fp, leverage=lev)
+
+        # 買進持有對照：資本須與策略同值才可比（期貨走 futures_init_capital）
+        is_fut = inst.asset_class == AssetClass.FUTURES
+        cm, sz = for_asset_class(inst, cfg)
+        bm = buy_and_hold(
+            df,
+            cfg.backtest.futures_init_capital if is_fut else cfg.backtest.init_capital,
+            cm, sz,
+            point_value=inst.contract.point_value if inst.contract else 1.0,
+            is_futures=is_fut,
+        )
+        print_report(inst.id, inst, calibration, rows,
+                     fingerprint=fp, leverage=lev, bm=bm)
         evaluated += 1
 
     if evaluated == 0:

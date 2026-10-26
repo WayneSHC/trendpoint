@@ -125,6 +125,19 @@ jobs:
             python run_b_segment.py --sims "$SIMS" 2>&1 | tee artifacts/b_segment_report.txt
           fi
 
+      # 濾網累加階梯 + 買進持有對照。回答的是 B 段報告回答不了的那個問題：
+      # **在這堆濾網之前，訊號本身有沒有東西？**
+      #
+      # 兩者都只加量測、不動訊號邏輯：
+      # - 買進持有給每個絕對報酬一個機會成本對照（此前全專案沒有任何 benchmark）。
+      # - 累加階梯由裸訊號逐層加回，讓「邊際在哪一層被殺掉」成為可讀的軌跡。
+      #
+      # continue-on-error：這是診斷用產出，失敗不該擋掉上游已經跑完的 B 段數字。
+      # 現貨路徑（run_ablation 走 equity_instrument），期貨不在其範圍。
+      - name: 執行濾網累加階梯與買進持有對照
+        continue-on-error: true
+        run: python run_ablation.py 2>&1 | tee artifacts/ablation_ladder_report.txt
+
       # Walk-Forward 是「是否改為預設啟用」的第二道門檻（單次回測對照不足）。
       # 它跑的是預設組態（三項皆關閉），故只作為樣本外穩定性的參考基線。
       - name: 執行 Walk-Forward 樣本外驗證
